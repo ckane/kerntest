@@ -1,5 +1,6 @@
 use core::alloc::{GlobalAlloc, Layout};
 use log::{error, info, trace};
+use snafu::prelude::*;
 
 /// Minimum segment allocation size is 256kB (64 pages)
 const MIN_SEGMENT_SIZE: usize = 64;
@@ -9,6 +10,26 @@ const MIN_SEGMENT_SIZE: usize = 64;
 /// in a free list
 const MIN_FREE_SIZE: usize = core::mem::size_of::<KernFree>();
 
+#[derive(Debug, Snafu)]
+pub(crate) enum Error {
+    /// Page allocator not defined
+    NoPageAllocator,
+
+    /// An invalid page was returned by the PageAllocator
+    InvalidPageReturned,
+
+    /// Not enough free pages remain to satisfy allocation request
+    InsufficientFree,
+
+    /// Allocation failure unrelated to free page availability
+    AllocationFailed,
+
+    /// Address provided by caller was in a page that wasn't mapped: {page:#018x}
+    UnmappedPage { page: usize },
+}
+
+pub type Result<T> = core::result::Result<T, Error>;
+
 /// Trait to describe implementation of the PageAllocator.
 /// Defines an object that the caller can request new pages
 /// from, and will also free/reclaim previously-allocated pages.
@@ -16,11 +37,11 @@ pub trait PageAllocator {
     /// Allocate the number of pages in `pages` and will
     /// return an Option with a char* pointer to the new
     /// buffer, or None if no allocation was possible.
-    fn palloc(&mut self, pages: usize) -> Option<*mut u8>;
+    fn palloc(&mut self, pages: usize) -> Result<*mut u8>;
 
     /// Will attempt to free the `count` pages pointed at by `ptr`.
     /// If no freeing action is taken, will silently continue.
-    fn pfree(&mut self, ptr: *mut u8, count: usize);
+    fn pfree(&mut self, ptr: *mut u8, count: usize) -> Result<()>;
 }
 
 #[derive(Clone, Debug)]
@@ -174,7 +195,7 @@ struct InnerKernelAlloc {
 }
 
 impl core::fmt::Debug for InnerKernelAlloc {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
         match &self.page_allocator {
             Some(pa) => {
                 write!(
@@ -217,12 +238,12 @@ impl InnerKernelAlloc {
     /// enough contiguous free space for allocating a buffer being requested. Will
     /// return the new segment so that it can be inserted without recursing the
     /// segment list again.
-    fn extend_heap(&mut self, pages: usize) -> Option<*mut KernHeapSegment> {
-        let pa = &mut self.page_allocator.as_deref_mut()?;
+    fn extend_heap(&mut self, pages: usize) -> Result<*mut KernHeapSegment> {
+        let pa = &mut self.page_allocator.as_deref_mut().ok_or(Error::NoPageAllocator)?;
         // Allocate the pages, plus one for the management structure
         let seg = pa
             .palloc(1 + pages)
-            .and_then(|s| unsafe { (s as *mut KernHeapSegment).as_mut() })?;
+            .and_then(|s| unsafe { (s as *mut KernHeapSegment).as_mut() }.ok_or(Error::InvalidPageReturned))?;
         let block_start: *mut KernFree =
             ((core::ptr::from_ref(seg) as usize) + 0x1000) as *mut KernFree;
 
@@ -264,10 +285,10 @@ impl InnerKernelAlloc {
         };
 
         // Return success Option
-        Some(seg)
+        Ok(seg)
     }
 
-    unsafe fn alloc(&mut self, layout: Layout) -> Option<*mut u8> {
+    unsafe fn alloc(&mut self, layout: Layout) -> Result<*mut u8> {
         // Do an unsafe const -> mut conversion here because GlobalAlloc
         // trait uses const instead of mut for &self
         //let mutself = (core::ptr::from_ref(self) as *mut Self).as_mut()?;
@@ -321,13 +342,13 @@ impl InnerKernelAlloc {
                         (*s).freelist = Some(kf);
                         *(m.unwrap()) = ka;
                         trace!("KernAlloc(ka+kf): {:?} {:?}", ka, kf);
-                        return Some(ka.buffer);
+                        return Ok(ka.buffer);
                     }
                     (Some(ka), None) => {
                         (*s).freelist = (*flptr).next;
                         *(m.unwrap()) = ka;
                         trace!("KernAlloc(ka): {:?}", ka);
-                        return Some(ka.buffer);
+                        return Ok(ka.buffer);
                     }
                     _ => {
                         trace!("KernAlloc(other)");
@@ -354,12 +375,12 @@ impl InnerKernelAlloc {
                         (Some(ka), Some(kf)) => {
                             next.next = Some(kf);
                             *(m.unwrap()) = ka;
-                            return Some(ka.buffer);
+                            return Ok(ka.buffer);
                         }
                         (Some(ka), None) => {
                             next.next = Some(following);
                             *(m.unwrap()) = ka;
-                            return Some(ka.buffer);
+                            return Ok(ka.buffer);
                         }
                         _ => {}
                     };
@@ -369,12 +390,16 @@ impl InnerKernelAlloc {
             // If we get this far it is because we haven't found any free space in the entire
             // list of segments. Therefore, it is possibly time to page in another segment.
             if (*s).next == None {
-                (*s).next = self.extend_heap(nss);
+                (*s).next = Some(self.extend_heap(nss)?);
                 trace!("KernAlloc recursing");
                 return self.alloc(layout);
             }
         }
-        None
+
+        // When we get here it's because there was some Allocation failure. If there's no
+        // free mem pages left, then that should have been reported/caught during one of
+        // the extend_heap() calls above
+        Err(Error::AllocationFailed)
     }
 
     unsafe fn dealloc(&mut self, ptr: *mut u8) {

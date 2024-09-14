@@ -5,6 +5,7 @@ use core::arch::asm;
 use core::fmt::Write;
 use core::slice::from_raw_parts_mut;
 use log::{error, info, trace};
+use snafu::prelude::*;
 use uefi::mem::memory_map::MemoryType;
 
 /*
@@ -23,6 +24,10 @@ use uefi::mem::memory_map::MemoryType;
  */
 #[derive(Copy, Clone, Debug)]
 struct MemPage(pub usize);
+
+#[derive(Debug, Snafu)]
+enum Error {
+}
 
 impl From<MemPage> for usize {
     fn from(m: MemPage) -> Self {
@@ -96,21 +101,22 @@ impl<'a> Iterator for SysMemMapPageIter<'a> {
 
 impl PageAllocator for MemDriver {
     /// Frees {count} pages and returns them to the page stack
-    fn pfree(&mut self, ptr: *mut u8, count: usize) {
+    fn pfree(&mut self, ptr: *mut u8, count: usize) -> crate::allocator::Result<()> {
         let mut lptr = ptr;
         for _ in 0..count {
             // Be sure to round to nearest page when freeing
-            self.pmap_free(lptr as usize & !0xfff);
+            self.pmap_free(lptr as usize & !0xfff).map(|x| ())?;
             Self::pinvalidate(lptr as usize);
             lptr = unsafe { lptr.add(0x1000) };
         }
+        Ok(())
     }
 
     /// Allocates the requested number of pages and returns the
     /// vmem pointer to them
-    fn palloc(&mut self, pages: usize) -> Option<*mut u8> {
+    fn palloc(&mut self, pages: usize) -> crate::allocator::Result<*mut u8> {
         if pages + self.ifp > self.free_pages.len() {
-            None
+            Err(crate::allocator::Error::InsufficientFree)
         } else {
             /* Map phys to vmem and return pointer to first vmem page. */
             self.pmap_at(pages)
@@ -240,27 +246,27 @@ impl MemDriver {
         ((vaddr as isize) >> 9) as usize | 0xffffff8000000000
     }
 
-    fn pmap_at(&mut self, pages: usize) -> Option<*mut u8> {
+    fn pmap_at(&mut self, pages: usize) -> crate::allocator::Result<*mut u8> {
         let mapped = self.dynstart.0 as *mut u8;
         for _ in 0..pages {
             let ipdpt = Self::pdpt_vaddr(self.dynstart.into());
             let ipde = Self::pde_vaddr(self.dynstart.into());
             let ipt = Self::pt_vaddr(self.dynstart.into());
-            if (self.dynstart.0 & 0x7fffffffff == 0) && Self::vtop(ipdpt) == None {
+            if (self.dynstart.0 & 0x7fffffffff == 0) && Self::vtop(ipdpt).is_err() {
                 /* Allocate new PDPT */
                 // trace!("pdpt mapping: {:#018x}->{:#018x}", self.dynstart.0, pgstack[self.firstpg/8 - beginning/8]);
                 Self::map_pdpt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipdpt);
                 self.ifp += 1;
             }
-            if (self.dynstart.0 & 0x3fffffff == 0) && Self::vtop(ipde) == None {
+            if (self.dynstart.0 & 0x3fffffff == 0) && Self::vtop(ipde).is_err() {
                 /* Allocate new PDE */
                 //trace!("pde mapping: {:#018x}->{:#018x}", self.dynstart.0, pgstack[self.firstpg/8 - beginning/8]);
                 Self::map_pde_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipde);
                 self.ifp += 1;
             }
-            if (self.dynstart.0 & 0x1fffff == 0) && Self::vtop(ipt) == None {
+            if (self.dynstart.0 & 0x1fffff == 0) && Self::vtop(ipt).is_err() {
                 /* Allocate new PT */
                 //trace!("pt mapping: {:#018x}->{:#018x}", self.dynstart.0, pgstack[self.firstpg/8 - beginning/8]);
                 Self::map_pt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
@@ -292,13 +298,13 @@ impl MemDriver {
                 phys
             );*/
         }
-        Some(mapped)
+        Ok(mapped)
     }
 
     /// Unmaps the vmem page and places it back on the stack. Returns the
     /// address of the physical page placed on the stack. None is returned
     /// if it couldn't unmap the page.
-    pub fn pmap_free(&mut self, page: usize) -> Option<usize> {
+    pub fn pmap_free(&mut self, page: usize) -> crate::allocator::Result<usize> {
         let phys = Self::vtop(page)?;
         // TODO: Similar to palloc, implement logic when we cross a page boundary
         // with the head of the page stack, then the freed physical page needs to
@@ -309,7 +315,7 @@ impl MemDriver {
 
         // Put the physical page back on the page stack
         self.free_pages[self.ifp - 1] = phys.into();
-        Some(phys)
+        Ok(phys)
     }
 
     /// Initialize the recursive paging structure for vtop lookup and
@@ -336,7 +342,7 @@ impl MemDriver {
         pml4
     }
 
-    pub fn vtop(inptr: usize) -> Option<usize> {
+    pub fn vtop(inptr: usize) -> crate::allocator::Result<usize> {
         /* Sign extension is performed when shifting signed values, so convert
          * addresses to isize for the shift, then back to usize afterward.
          */
@@ -347,13 +353,13 @@ impl MemDriver {
          * guards against a page fault when navigating the paging structures due
          * to an intermediate lookup table not being mapped at all.
          */
-        if ptlookup < 0xfffffffffffff000 && Self::vtop(ptlookup) == None {
-            //trace!("Failing on {:#018x}", (ptlookup as isize) >> 9);
-            None // Return None if not mapped
+        if ptlookup < 0xfffffffffffff000 && Self::vtop(ptlookup).is_err() {
+            Err(crate::allocator::Error::UnmappedPage { page: inptr })
         } else {
             unsafe { (ptlookup as *const usize).as_ref() }
                 .filter(|x| (*x & 0x1) == 1) // If the entry is !Present then return None
                 .map(|x| *x & 0xfffffffffffff000 | (inptr & 0x1ff))
+                .ok_or(crate::allocator::Error::UnmappedPage { page: inptr })
         }
     }
 

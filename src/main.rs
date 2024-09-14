@@ -16,6 +16,7 @@ use core::panic::PanicInfo;
 use core::ptr::addr_of_mut;
 use kernel_args::KernelArgs;
 use log::{error, info, trace};
+use snafu::prelude::*;
 use uefi::mem::memory_map::MemoryType;
 
 extern crate alloc;
@@ -69,37 +70,36 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
         MEM_DRIVER.init(karg);
     }
 
-    if let Some(x) = MemDriver::vtop(0xffffe00000019001) {
-        info!("phys: {:#018x}", x);
-    } else {
-        info!("Failed caluclating physaddr");
+    match MemDriver::vtop(0xffffe00000019001) {
+        Ok(x) => info!("phys: {:#018x}", x),
+        Err(e) => error!("Failed calculating physaddr: {}", e)
     }
 
-    if let Some(x) = MemDriver::vtop(0xffffe0000001a001) {
-        info!("phys: {:#018x}", x);
-    } else {
-        info!("Failed caluclating physaddr");
+    match MemDriver::vtop(0xffffe0000001a001) {
+        Ok(x) => info!("phys: {:#018x}", x),
+        Err(e) => error!("Failed calculating physaddr: {}", e)
     }
 
-    if let Some(x) = MemDriver::vtop(0xffffe0000001b001) {
-        info!("phys: {:#018x}", x);
-    } else {
-        info!("Failed caluclating physaddr");
+    match MemDriver::vtop(0xffffe0000001b001) {
+        Ok(x) => info!("phys: {:#018x}", x),
+        Err(e) => error!("Failed calculating physaddr: {}", e)
     }
 
-    if let Some(x) = MemDriver::vtop(0xffffd00000000001) {
-        info!("phys: {:#018x} (bad!)", x);
-    } else {
-        info!("Failed caluclating physaddr (good!)");
+    match MemDriver::vtop(0xffffd00000000001) {
+        Ok(x) => info!("phys: {:#018x}", x),
+        Err(e) => error!("Failed calculating physaddr: {}", e)
     }
 
     let numpgs = 300000;
-    if let Some(x) = unsafe { MEM_DRIVER.palloc(numpgs) } {
-        info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
-        unsafe { MEM_DRIVER.pfree(x, numpgs) };
-        info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
-    } else {
-        info!("Allocation failure");
+    match unsafe { MEM_DRIVER.palloc(numpgs) } {
+        Ok(x) => {
+            info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
+            unsafe { MEM_DRIVER.pfree(x, numpgs) };
+            info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
+        }
+        Err(e) => {
+            error!("{}", e);
+        }
     }
 
     // Set up the KernelAlloc

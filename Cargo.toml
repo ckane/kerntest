@@ -9,3 +9,4 @@ edition = "2021"
 embedded-graphics = "0.8"
 uefi = "0.32"
 log = "0.4"
+snafu = { version = "0.8", default-features = false, features = ["unstable-core-error"] }
