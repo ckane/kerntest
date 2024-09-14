@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 embedded-graphics = "0.8"
-uefi = "0.31"
+uefi = "0.32"
 log = "0.4"
