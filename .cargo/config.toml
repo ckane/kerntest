@@ -1,0 +1,15 @@
+[target.x86_64-unknown-none]
+rustflags = [
+    #"-Z", "pre-link-args=-no-pie",
+    #"-Z", "pre-link-arg=-no-pie",
+    #"-Z", "pre-link-arg=-static",
+    "-C", "link-arg=--image-base",
+    "-C", "link-arg=0xffffe00000000000",
+    #"-C", "link-arg=-z",
+    #"-C", "link-arg=norelro",
+    "-C", "code-model=kernel",
+    "-C", "relocation-model=dynamic-no-pic",
+]
+
+[build]
+target = "x86_64-unknown-none"
