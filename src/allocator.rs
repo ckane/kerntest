@@ -1,5 +1,5 @@
 use core::alloc::{GlobalAlloc, Layout};
-use log::{info, error, trace};
+use log::{error, info, trace};
 
 /// Minimum segment allocation size is 256kB (64 pages)
 const MIN_SEGMENT_SIZE: usize = 64;
@@ -42,17 +42,20 @@ struct KernFreeIter {
 
 impl KernFree {
     fn iter(&mut self) -> KernFreeIter {
-        KernFreeIter { cur: Some(core::ptr::from_mut(self)) }
+        KernFreeIter {
+            cur: Some(core::ptr::from_mut(self)),
+        }
     }
 
     /// Attempts to return an allocation, and an optional KernFree remainder, from the
     /// current free block.
-    fn alloc_from(
-        &mut self,
-        layout: Layout,
-    ) -> (Option<KernAllocation>, Option<&mut Self>) {
-        trace!("self-length: {}, demand: {}, min_free: {}", self.length,
-            layout.pad_to_align().size(), MIN_FREE_SIZE);
+    fn alloc_from(&mut self, layout: Layout) -> (Option<KernAllocation>, Option<&mut Self>) {
+        trace!(
+            "self-length: {}, demand: {}, min_free: {}",
+            self.length,
+            layout.pad_to_align().size(),
+            MIN_FREE_SIZE
+        );
         if self.length >= layout.pad_to_align().size() + MIN_FREE_SIZE {
             // If the freeblock is big enough to hold the allocation and also
             // track another smaller free block, then we need to partition
@@ -116,7 +119,7 @@ impl Default for KernAllocation {
     fn default() -> Self {
         Self {
             buffer: core::ptr::null_mut(),
-            length: 0
+            length: 0,
         }
     }
 }
@@ -174,7 +177,12 @@ impl core::fmt::Debug for InnerKernelAlloc {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         match &self.page_allocator {
             Some(pa) => {
-                write!(f, "page_allocator: {:?}, kheap: {:?}\n", core::ptr::from_ref(pa) as *mut u8, self.kheap)
+                write!(
+                    f,
+                    "page_allocator: {:?}, kheap: {:?}\n",
+                    core::ptr::from_ref(pa) as *mut u8,
+                    self.kheap
+                )
             }
             None => {
                 write!(f, "page_allocator: None, kheap: {:?}\n", self.kheap)
@@ -247,11 +255,13 @@ impl InnerKernelAlloc {
         // structure is actually stored inside of the free block that it represents,
         // enabling us to manage free memory without additional overhead.
         let fl = &mut (*seg).freelist.unwrap();
-        unsafe { fl.write(KernFree {
-            buffer: *fl as *mut u8,
-            length: 0x1000 * pages,
-            next: None,
-        })};
+        unsafe {
+            fl.write(KernFree {
+                buffer: *fl as *mut u8,
+                length: 0x1000 * pages,
+                next: None,
+            })
+        };
 
         // Return success Option
         Some(seg)
@@ -292,7 +302,7 @@ impl InnerKernelAlloc {
 
             // If no freelist, move on
             if (*s).freelist.is_none() {
-                continue
+                continue;
             }
 
             let flptr = (*s).freelist.unwrap();
@@ -305,7 +315,6 @@ impl InnerKernelAlloc {
             // See if there's an available free slot on the heap
             let m = (*s).alloc_table.iter_mut().find(|x| x.length == 0);
             if m.is_some() {
-
                 // See if the head of the freelist can be used
                 match (*(*s).freelist.unwrap()).alloc_from(layout) {
                     (Some(ka), Some(kf)) => {
@@ -326,8 +335,14 @@ impl InnerKernelAlloc {
                 };
 
                 // Scan across fiter until a suitable freelist block is found that meets our
-                // sizing needs (or we reach the end) 
-                while let Some(_) = fiter.next_if(|&x| x.as_ref().unwrap().next.as_ref().is_some_and(|&y| y.as_ref().unwrap().length < layout.pad_to_align().size())) {};
+                // sizing needs (or we reach the end)
+                while let Some(_) =
+                    fiter.next_if(|&x| {
+                        x.as_ref().unwrap().next.as_ref().is_some_and(|&y| {
+                            y.as_ref().unwrap().length < layout.pad_to_align().size()
+                        })
+                    })
+                {}
 
                 // If fiter.peek_mut() yields a Some() then it means we found a match and we
                 // should be able to alloc in this free block, so long as a free allocation
@@ -367,7 +382,12 @@ impl InnerKernelAlloc {
             if ((*s).base_addr + ((*s).length * 0x1000)) < (ptr as usize) {
                 // If the segment's tail is numerically before ptr, then we need to
                 // advance to the next segment
-                trace!("Skip: {:#018x}-{:#018x} < {:#018x}", (*s).base_addr, (*s).length * 0x1000, ptr as usize);
+                trace!(
+                    "Skip: {:#018x}-{:#018x} < {:#018x}",
+                    (*s).base_addr,
+                    (*s).length * 0x1000,
+                    ptr as usize
+                );
                 continue;
             } else if (*s).base_addr < (ptr as usize) {
                 // If base_addr is less than ptr here, it means that ptr is
@@ -375,7 +395,12 @@ impl InnerKernelAlloc {
                 // is numerically after ptr, while the head is numerically
                 // before it. So this is where the free has to happen
 
-                trace!("Working: {:#018x}-{:#018x} < {:#018x}", (*s).base_addr, (*s).length * 0x1000, ptr as usize);
+                trace!(
+                    "Working: {:#018x}-{:#018x} < {:#018x}",
+                    (*s).base_addr,
+                    (*s).length * 0x1000,
+                    ptr as usize
+                );
 
                 for a in (*s).alloc_table.iter_mut() {
                     if a.buffer as *mut u8 == ptr {
@@ -390,16 +415,18 @@ impl InnerKernelAlloc {
                                 let mut freed = KernFree {
                                     buffer: b.buffer,
                                     length: b.length,
-                                    next: Some(fl)
+                                    next: Some(fl),
                                 };
 
                                 // If the successive entries in the freelist are adjacent blocks,
                                 // then recombine them
-                                while freed.next.is_some_and(|x| ((*x).buffer as usize) == (freed.buffer as usize + freed.length)) {
+                                while freed.next.is_some_and(|x| {
+                                    ((*x).buffer as usize) == (freed.buffer as usize + freed.length)
+                                }) {
                                     trace!("Freed(1): {:?}", freed);
                                     freed.length += (*(freed.next.unwrap())).length;
                                     freed.next = (*(freed.next.unwrap())).next;
-                                };
+                                }
 
                                 let new_free = b.buffer as *mut KernFree;
                                 *new_free = freed;
@@ -407,7 +434,6 @@ impl InnerKernelAlloc {
                                 trace!("NewFree (head): {:?}", *new_free);
                                 return;
                             }
-
 
                             let mut fli = (*fl).iter();
                             loop {
@@ -422,14 +448,14 @@ impl InnerKernelAlloc {
                                     trace!("NewFree (ext): {:?}", *fb);
                                     return;
                                 }
-                                
+
                                 // If the next block isn't present, then this newly freed
                                 // block goes on the end
                                 if fb.next.is_none() {
                                     let freed = KernFree {
                                         buffer: b.buffer,
                                         length: b.length,
-                                        next: None
+                                        next: None,
                                     };
 
                                     let new_free = b.buffer as *mut KernFree;
@@ -449,14 +475,17 @@ impl InnerKernelAlloc {
                                     let mut freed = KernFree {
                                         buffer: b.buffer,
                                         length: b.length,
-                                        next: fb.next
+                                        next: fb.next,
                                     };
 
-                                    while freed.next.is_some_and(|x| ((*x).buffer as usize) == (freed.buffer as usize + freed.length)) {
+                                    while freed.next.is_some_and(|x| {
+                                        ((*x).buffer as usize)
+                                            == (freed.buffer as usize + freed.length)
+                                    }) {
                                         trace!("Freed(2): {:?}", freed);
                                         freed.length += (*(freed.next.unwrap())).length;
                                         freed.next = (*(freed.next.unwrap())).next;
-                                    };
+                                    }
 
                                     let new_free = b.buffer as *mut KernFree;
                                     *new_free = freed;
@@ -473,7 +502,7 @@ impl InnerKernelAlloc {
                             let freed = KernFree {
                                 buffer: a.buffer,
                                 length: a.length,
-                                next: None
+                                next: None,
                             };
 
                             let new_free = a.buffer as *mut KernFree;
@@ -498,7 +527,9 @@ impl InnerKernelAlloc {
 
 unsafe impl GlobalAlloc for KernelAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        INNER_KERN_ALLOC.alloc(layout).unwrap_or(core::ptr::null::<u8>() as *mut u8)
+        INNER_KERN_ALLOC
+            .alloc(layout)
+            .unwrap_or(core::ptr::null::<u8>() as *mut u8)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
         INNER_KERN_ALLOC.dealloc(ptr)
@@ -511,5 +542,4 @@ static mut INNER_KERN_ALLOC: InnerKernelAlloc = InnerKernelAlloc {
 };
 
 #[global_allocator]
-pub static mut KERN_ALLOC: KernelAlloc = KernelAlloc {
-};
+pub static mut KERN_ALLOC: KernelAlloc = KernelAlloc {};

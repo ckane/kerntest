@@ -172,31 +172,19 @@ impl MemDriver {
                 /* Allocate new PDE */
                 let pp = page_iter.next().unwrap();
                 Self::map_pde_exact(vmem_cursor, pp);
-                info!(
-                    "pde-mapping: {:#018x}->{:#018x}",
-                    vmem_cursor,
-                    pp
-                );
+                info!("pde-mapping: {:#018x}->{:#018x}", vmem_cursor, pp);
             }
             if vmem_cursor & 0x01fffff == 0 {
                 /* Allocate new PT */
                 let pp = page_iter.next().unwrap();
                 Self::map_pt_exact(vmem_cursor, pp);
-                info!(
-                    "pt-mapping: {:#018x}->{:#018x}",
-                    vmem_cursor,
-                    pp
-                );
+                info!("pt-mapping: {:#018x}->{:#018x}", vmem_cursor, pp);
             }
             if vmem_cursor & 0x0fff == 0 {
                 /* Map new PTE */
                 Self::pinvalidate(vmem_cursor);
                 Self::map_page_exact(vmem_cursor, p);
-                trace!(
-                    "mapping: {:#018x}->{:#018x}",
-                    vmem_cursor,
-                    p
-                );
+                trace!("mapping: {:#018x}->{:#018x}", vmem_cursor, p);
                 Self::pinvalidate(vmem_cursor);
                 for _ in 0..0x200 {
                     if let Some(np) = page_iter.next() {

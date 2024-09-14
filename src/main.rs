@@ -19,12 +19,12 @@ use log::{error, info, trace};
 use uefi::mem::memory_map::MemoryType;
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 use allocator::{PageAllocator, KERN_ALLOC};
-use memdrv::{MemDriver, MEM_DRIVER};
 use klog::KernLogger;
+use memdrv::{MemDriver, MEM_DRIVER};
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -63,11 +63,7 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
         //info!("{:?}\n", a);
         pages += a.pages as usize;
     }
-    info!(
-        "Total mem: {}mb, {}pg",
-        pages * 4096 / 1048576,
-        pages
-    );
+    info!("Total mem: {}mb, {}pg", pages * 4096 / 1048576, pages);
 
     unsafe {
         MEM_DRIVER.init(karg);
@@ -99,17 +95,9 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
 
     let numpgs = 300000;
     if let Some(x) = unsafe { MEM_DRIVER.palloc(numpgs) } {
-        info!(
-            "Allocated {} pages @ {:#018x}",
-            numpgs,
-            x as usize
-        );
+        info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
         unsafe { MEM_DRIVER.pfree(x, numpgs) };
-        info!(
-            "Freed {} pages @ {:#018x}",
-            numpgs,
-            x as usize
-        );
+        info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
     } else {
         info!("Allocation failure");
     }
