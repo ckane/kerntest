@@ -98,12 +98,12 @@ impl<'a> Iterator for SysMemMapPageIter<'a> {
 impl PageAllocator for MemDriver {
     /// Frees {count} pages and returns them to the page stack
     fn pfree(&mut self, ptr: *mut u8, count: usize) -> crate::allocator::Result<()> {
-        let mut lptr = ptr;
+        let mut lptr = ptr as usize;
         for _ in 0..count {
             // Be sure to round to nearest page when freeing
-            self.pmap_free(lptr as usize & !0xfff).map(|x| ())?;
-            Self::pinvalidate(lptr as usize);
-            lptr = unsafe { lptr.add(0x1000) };
+            self.pmap_free(lptr & !0xfff).map(|_| ())?;
+            Self::pinvalidate(lptr);
+            lptr = lptr + 0x1000;
         }
         Ok(())
     }
@@ -342,7 +342,7 @@ impl MemDriver {
         /* Sign extension is performed when shifting signed values, so convert
          * addresses to isize for the shift, then back to usize afterward.
          */
-        let ptlookup = ((inptr as isize) >> 9) as usize | 0xffffff8000000000;
+        let ptlookup = ((inptr as isize & !0xfff) >> 9) as usize | 0xffffff8000000000;
 
         /* Make sure that we recursively test the validity of the page map level
          * pointers on the way to retrieving the physical address mapping. This
@@ -353,8 +353,8 @@ impl MemDriver {
             Err(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
         } else {
             unsafe { (ptlookup as *const usize).as_ref() }
-                .filter(|x| (*x & 0x1) == 1) // If the entry is !Present then return None
-                .map(|x| *x & 0xfffffffffffff000 | (inptr & 0x1ff))
+                .filter(|x| (*x & 0x1) == 1)
+                .map(|x| *x & 0xfffffffffffff000 | (inptr & 0xfff))
                 .ok_or(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
         }
     }
@@ -368,16 +368,21 @@ impl MemDriver {
         let ptlookup = ((vaddr as isize) >> shift) as usize;
         let page = unsafe { (ptlookup as *mut PDEntry).as_mut() };
         if let Some(p) = page {
-            *p = crate::paging::PDEntry::from_paddr(paddr);
-        }
+            if paddr > 0 {
+                *p = crate::paging::PDEntry::from_paddr(paddr);
+                Self::pinvalidate(ptlookup as usize);
 
-        // Zero out the allocated page
-        let pdlookup = ((vaddr as isize) >> (shift - 9)) as usize;
-        let page =
-            unsafe { core::slice::from_raw_parts_mut((pdlookup & !0xfff) as *mut PDEntry, 0x200) };
-        page.fill(crate::paging::PDEntry::new_null());
-        Self::pinvalidate(pdlookup as usize);
-        Self::pinvalidate(ptlookup as usize);
+                // Zero out the allocated page (only if mapping a phys page)
+                let pdlookup = ((vaddr as isize) >> (shift - 9)) as usize;
+                let pdpage =
+                    unsafe { core::slice::from_raw_parts_mut((pdlookup & !0xfff) as *mut PDEntry, 0x200) };
+                pdpage.fill(crate::paging::PDEntry::new_null());
+                Self::pinvalidate(pdlookup as usize);
+            } else {
+                *p = crate::paging::PDEntry::new_null();
+                Self::pinvalidate(ptlookup as usize);
+            }
+        }
     }
 
     /// Maps a specific vaddr PTE to a paddr. Expects the PML4, PDPT, PDE,

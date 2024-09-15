@@ -72,7 +72,7 @@ fn test_palloc(numpgs: usize) -> Result<()> {
     info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
 
     // Ignoring any failures from free
-    let _ = unsafe { MEM_DRIVER.pfree(x, numpgs) };
+    let _ = unsafe { MEM_DRIVER.pfree(x, numpgs) }?;
 
     info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
     Ok(())
