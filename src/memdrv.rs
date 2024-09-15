@@ -2,10 +2,8 @@ use crate::allocator::PageAllocator;
 use crate::kernel_args::{KernelArgs, OSMemEntry};
 use crate::paging::PDEntry;
 use core::arch::asm;
-use core::fmt::Write;
 use core::slice::from_raw_parts_mut;
-use log::{error, info, trace};
-use snafu::prelude::*;
+use log::{info, trace};
 use uefi::mem::memory_map::MemoryType;
 
 /*
@@ -285,14 +283,9 @@ impl MemDriver {
              * its physical page instead.
              */
             Self::map_page_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
-            self.ifp += 1;
             Self::pinvalidate(self.dynstart.into());
+            self.ifp += 1;
             self.dynstart = MemPage(self.dynstart.0 + 0x1000);
-            /*trace!("done mapping: {:#018x}->{:#018x} (old: {:#018x})",
-                self.dynstart.0,
-                pgstack[self.firstpg/8 - beginning/8],
-                phys
-            );*/
         }
         Ok(mapped)
     }
