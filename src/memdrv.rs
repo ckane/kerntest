@@ -135,14 +135,14 @@ impl MemDriver {
         // Stores the memory map passed into the kernel by the UEFI bootloader
         self.memmap = SysMemMap::new(karg.get_memmap_slice());
         self.init_recursive();
-        self.alloc_pagestack(karg);
+        self.alloc_pagestack();
     }
 
     fn iter_physpage<'a>(&'a self) -> SysMemMapPageIter<'a> {
         self.memmap.iter(MemoryType::CONVENTIONAL)
     }
 
-    fn alloc_pagestack(&mut self, karg: &mut KernelArgs) {
+    fn alloc_pagestack(&mut self) {
         let conv_page_count = self.iter_physpage().count();
         let pages_needed = conv_page_count * core::mem::size_of::<MemPage>() / 0x1000;
         let mut vmem_cursor = self.dynbase.0 as usize;
