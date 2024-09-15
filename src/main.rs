@@ -11,7 +11,6 @@ mod paging;
 
 use core::alloc::GlobalAlloc;
 use core::arch::{asm, global_asm};
-use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::ptr::addr_of_mut;
 use kernel_args::KernelArgs;
