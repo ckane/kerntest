@@ -331,6 +331,7 @@ impl MemDriver {
         pml4
     }
 
+    /// Translate virtual to physical addresses using the CPU paging structures
     pub fn vtop(inptr: usize) -> crate::allocator::Result<usize> {
         /* Sign extension is performed when shifting signed values, so convert
          * addresses to isize for the shift, then back to usize afterward.
@@ -346,9 +347,9 @@ impl MemDriver {
             Err(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
         } else {
             unsafe { (ptlookup as *const usize).as_ref() }
-                .filter(|x| (*x & 0x1) == 1)
-                .map(|x| *x & 0xfffffffffffff000 | (inptr & 0xfff))
+                .filter(|x| (*x & 0x1) == 1) // If !Present, then return Err
                 .ok_or(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
+                .map(|x| *x & 0xfffffffffffff000 | (inptr & 0xfff))
         }
     }
 

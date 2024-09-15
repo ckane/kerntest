@@ -124,7 +124,6 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
         }
     }
 
-
     // Set up the KernelAlloc
     unsafe { KERN_ALLOC.set_page_allocator(addr_of_mut!(MEM_DRIVER)) };
 
