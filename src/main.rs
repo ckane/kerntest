@@ -27,9 +27,24 @@ use klog::KernLogger;
 use memdrv::{MemDriver, MEM_DRIVER};
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    error!("Panic, halting: {}", info);
     unsafe { asm!("hlt", options(noreturn)) };
 }
+
+#[derive(Debug, Snafu)]
+enum Error {
+    /// Error in Allocator: {source}
+    Allocator { source: allocator::Error }
+}
+
+impl From<allocator::Error> for Error {
+    fn from(ae: allocator::Error) -> Self {
+        Self::Allocator { source: ae }
+    }
+}
+
+type Result<T> = core::result::Result<T, Error>;
 
 /*
  * A very simple "trampoline" that jumps us into Rust code.
@@ -43,6 +58,25 @@ global_asm! {
 
 pub static mut GKARG: *mut KernelArgs = core::ptr::null_mut();
 static KLOG: KernLogger = KernLogger;
+
+fn test_vtop(addrs: &[usize]) -> Result<()> {
+    for a in addrs {
+        let phys = MemDriver::vtop(*a).map_err(|x| Error::Allocator { source: x })?;
+        info!("phys: {:#018x}", phys);
+    }
+    Ok(())
+}
+
+fn test_palloc(numpgs: usize) -> Result<()> {
+    let x: *mut u8 = unsafe { MEM_DRIVER.palloc(numpgs) }?;
+    info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
+
+    // Ignoring any failures from free
+    let _ = unsafe { MEM_DRIVER.pfree(x, numpgs) };
+
+    info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
+    Ok(())
+}
 
 #[no_mangle]
 fn kernmain(karg: &mut KernelArgs) -> ! {
@@ -69,37 +103,27 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
         MEM_DRIVER.init(karg);
     }
 
-    match MemDriver::vtop(0xffffe00000019001) {
-        Ok(x) => info!("phys: {:#018x}", x),
-        Err(e) => error!("Failed calculating physaddr: {}", e)
-    }
+    // The last address in this list should throw an Err()
+    let testlist = &[0xffffe00000019001, 0xffffe0000001a001, 0xffffe0000001b001, 0xffffd00000000001];
+    if let Err(top_err) = test_vtop(testlist) {
+        error!("Failed calculating physaddr: {}", top_err);
 
-    match MemDriver::vtop(0xffffe0000001a001) {
-        Ok(x) => info!("phys: {:#018x}", x),
-        Err(e) => error!("Failed calculating physaddr: {}", e)
-    }
-
-    match MemDriver::vtop(0xffffe0000001b001) {
-        Ok(x) => info!("phys: {:#018x}", x),
-        Err(e) => error!("Failed calculating physaddr: {}", e)
-    }
-
-    match MemDriver::vtop(0xffffd00000000001) {
-        Ok(x) => info!("phys: {:#018x}", x),
-        Err(e) => error!("Failed calculating physaddr: {}", e)
-    }
-
-    let numpgs = 300000;
-    match unsafe { MEM_DRIVER.palloc(numpgs) } {
-        Ok(x) => {
-            info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
-            let _ = unsafe { MEM_DRIVER.pfree(x, numpgs) };
-            info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
+        // Validate that the only failure was the last entry reporting as unmapped
+        if let Error::Allocator { source: allocator::Error::UnmappedPage { page, pt } } = top_err {
+            if page != testlist[testlist.len() - 1] {
+                panic!("Failure unexpected testing page {page:#018x}, {pt:#018x}");
+            }
         }
+    }
+    info!("vtop tests passed (above error is expected)");
+
+    match test_palloc(300000) {
+        Ok(_) => info!("page alloc tests passed"),
         Err(e) => {
-            error!("{}", e);
+            panic!("Page alloc tests failed: {e}");
         }
     }
+
 
     // Set up the KernelAlloc
     unsafe { KERN_ALLOC.set_page_allocator(addr_of_mut!(MEM_DRIVER)) };
