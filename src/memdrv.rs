@@ -248,21 +248,21 @@ impl MemDriver {
             let ipt = Self::pt_vaddr(self.dynstart.into());
             if (self.dynstart.0 & 0x7fffffffff == 0) && Self::vtop(ipdpt).is_err() {
                 /* Allocate new PDPT */
-                // trace!("pdpt mapping: {:#018x}->{:#018x}", self.dynstart.0, pgstack[self.firstpg/8 - beginning/8]);
+                trace!("pdpt mapping: {:#018x}->{:#018x}", self.dynstart.0, self.free_pages[self.ifp].0);
                 Self::map_pdpt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipdpt);
                 self.ifp += 1;
             }
             if (self.dynstart.0 & 0x3fffffff == 0) && Self::vtop(ipde).is_err() {
                 /* Allocate new PDE */
-                //trace!("pde mapping: {:#018x}->{:#018x}", self.dynstart.0, pgstack[self.firstpg/8 - beginning/8]);
+                trace!("pde mapping: {:#018x}->{:#018x}", self.dynstart.0, self.free_pages[self.ifp].0);
                 Self::map_pde_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipde);
                 self.ifp += 1;
             }
             if (self.dynstart.0 & 0x1fffff == 0) && Self::vtop(ipt).is_err() {
                 /* Allocate new PT */
-                //trace!("pt mapping: {:#018x}->{:#018x}", self.dynstart.0, pgstack[self.firstpg/8 - beginning/8]);
+                trace!("pt mapping: {:#018x}->{:#018x}", self.dynstart.0, self.free_pages[self.ifp].0);
                 Self::map_pt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipt);
                 self.ifp += 1;
