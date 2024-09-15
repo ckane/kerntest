@@ -350,12 +350,12 @@ impl MemDriver {
          * to an intermediate lookup table not being mapped at all.
          */
         if ptlookup < 0xfffffffffffff000 && Self::vtop(ptlookup).is_err() {
-            Err(crate::allocator::Error::UnmappedPage { page: inptr })
+            Err(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
         } else {
             unsafe { (ptlookup as *const usize).as_ref() }
                 .filter(|x| (*x & 0x1) == 1) // If the entry is !Present then return None
                 .map(|x| *x & 0xfffffffffffff000 | (inptr & 0x1ff))
-                .ok_or(crate::allocator::Error::UnmappedPage { page: inptr })
+                .ok_or(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
         }
     }
 

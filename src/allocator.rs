@@ -24,8 +24,9 @@ pub(crate) enum Error {
     /// Allocation failure unrelated to free page availability
     AllocationFailed,
 
-    /// Address provided by caller was in a page that wasn't mapped: {page:#018x}
-    UnmappedPage { page: usize },
+    /// Address provided by caller was in a page that wasn't mapped: page: {page:#018x},
+    /// pt: {pt:#018x}
+    UnmappedPage { page: usize, pt: usize },
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
