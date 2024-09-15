@@ -25,10 +25,6 @@ use uefi::mem::memory_map::MemoryType;
 #[derive(Copy, Clone, Debug)]
 struct MemPage(pub usize);
 
-#[derive(Debug, Snafu)]
-enum Error {
-}
-
 impl From<MemPage> for usize {
     fn from(m: MemPage) -> Self {
         m.0
