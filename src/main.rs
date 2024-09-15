@@ -94,7 +94,7 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
     match unsafe { MEM_DRIVER.palloc(numpgs) } {
         Ok(x) => {
             info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
-            unsafe { MEM_DRIVER.pfree(x, numpgs) };
+            let _ = unsafe { MEM_DRIVER.pfree(x, numpgs) };
             info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
         }
         Err(e) => {
