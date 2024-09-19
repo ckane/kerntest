@@ -4,6 +4,7 @@
 
 mod allocator;
 mod framebuffer;
+mod interrupts;
 mod kernel_args;
 mod klog;
 mod memdrv;
@@ -78,31 +79,7 @@ fn test_palloc(numpgs: usize) -> Result<()> {
     Ok(())
 }
 
-#[no_mangle]
-fn kernmain(karg: &mut KernelArgs) -> ! {
-    let karg2: KernelArgs = karg.clone();
-    unsafe { GKARG = karg };
-    log::set_logger(&KLOG).unwrap();
-    log::set_max_level(log::LevelFilter::Debug);
-
-    for a in 0..10 {
-        info!("{:03} Hello from kernel", a);
-    }
-    info!("{:?}", karg2);
-
-    let mm = karg2.get_memmap_slice();
-
-    let mut pages: usize = 0;
-    for a in mm.iter().filter(|x| x.ty == MemoryType::CONVENTIONAL) {
-        //info!("{:?}\n", a);
-        pages += a.pages as usize;
-    }
-    info!("Total mem: {}mb, {}pg", pages * 4096 / 1048576, pages);
-
-    unsafe {
-        MEM_DRIVER.init(karg);
-    }
-
+fn kernel_start() -> () {
     // The last address in this list should throw an Err()
     let testlist = &[0xffffe00000019001, 0xffffe0000001a001, 0xffffe0000001b001, 0xffffd00000000001];
     if let Err(top_err) = test_vtop(testlist) {
@@ -165,5 +142,76 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
 
     info!("bt: {:?}", &bt);
 
-    unsafe { asm!("hlt", options(noreturn)) };
+    let gdt: [crate::interrupts::GlobalDescriptorEntry; 3] = [
+        crate::interrupts::GlobalDescriptorEntry::new_null(),
+        crate::interrupts::GlobalDescriptorEntry::new_codeseg(0),
+        crate::interrupts::GlobalDescriptorEntry::new_dataseg(0),
+    ];
+    let gdtr = crate::interrupts::Gdtr::new(&gdt);
+
+    info!("gdtr: {:#034x}", u128::from(&gdtr));
+
+    for (ii, gg) in gdt.iter().enumerate() {
+        info!("GDT{:#04x}: {:#036x}", ii, u128::from(gg));
+    }
+
+    unsafe {
+    asm!(
+        "lgdt [{}]",
+        "mov ax, 32",
+        "mov ds, ax",
+        "mov ss, ax",
+        "mov es, ax",
+        "mov fs, ax",
+        "mov gs, ax",
+        "mov rax, 16",
+        "push rax",
+        "lea rax, [22f + rip]",
+        "push rax",
+        "retfq",
+        "22:",
+        in(reg) &gdtr,
+        //in(reg) stage_two,
+        options(readonly, nostack, preserves_flags)
+    );
+    };
+    panic!("End of kernel execution");
+}
+
+#[no_mangle]
+fn kernmain(karg: &mut KernelArgs) -> ! {
+    let karg2: KernelArgs = karg.clone();
+    unsafe { GKARG = karg };
+    log::set_logger(&KLOG).unwrap();
+    log::set_max_level(log::LevelFilter::Debug);
+
+    for a in 0..10 {
+        info!("{:03} Hello from kernel", a);
+    }
+    info!("{:?}", karg2);
+
+    let mm = karg2.get_memmap_slice();
+
+    let mut pages: usize = 0;
+    for a in mm.iter().filter(|x| x.ty == MemoryType::CONVENTIONAL) {
+        //info!("{:?}\n", a);
+        pages += a.pages as usize;
+    }
+    info!("Total mem: {}mb, {}pg", pages * 4096 / 1048576, pages);
+
+    unsafe {
+        MEM_DRIVER.init(karg);
+    }
+
+    // Initialize new 4MB kernel stack and switch to it
+    let kernstack = if let Ok(x) = unsafe { MEM_DRIVER.palloc(1024) } {
+        info!("Stack allocated: {:#018x}", x as usize);
+        x
+    } else {
+        panic!("Failure to allocate stack");
+    };
+
+    // Execute the next phase of kernel start-up on the new stack we just
+    // allocated
+    unsafe { psm::replace_stack(kernstack, 4096*1024, kernel_start) };
 }
