@@ -19,7 +19,6 @@ impl GlobalDescriptorEntry {
     }
     pub fn new_codeseg(dpl: u8) -> Self {
         Self(
-            0          |
             0xaf    << 48 | // Flags: +G +L, Limit: 0xf
             (dpl as u128 & 0x3) << 45 |
             //0x9f << 40 |   // Access: +P, +S, +E, +DC, +R, +A
@@ -29,7 +28,6 @@ impl GlobalDescriptorEntry {
     }
     pub fn new_dataseg(dpl: u8) -> Self {
         Self(
-            0          |
             0xcf    << 48 | // Flags: +G +DB, Limit: 0xf
             (dpl as u128 & 0x3) << 45 |
             //0x93 << 40  | // Access: +P, +S, +W, +A
