@@ -90,7 +90,8 @@ impl KernFree {
                 length: self.length - layout.pad_to_align().size(),
                 next: self.next,
             };
-            let offset = (((self.buffer as usize) + layout.align() - 1) & !(layout.align() - 1)) - (self.buffer as usize);
+            let offset = (((self.buffer as usize) + layout.align() - 1) & !(layout.align() - 1))
+                - (self.buffer as usize);
             (
                 Some(KernAllocation {
                     buffer: (self.buffer as usize + offset) as *mut u8,
@@ -102,7 +103,8 @@ impl KernFree {
             // If the freeblock is big enough for the allocation, but not a
             // remainder freeblock, then just return the new allocation and
             // discard the remainder.
-            let offset = (((self.buffer as usize) + layout.align() - 1) & !layout.align()) - (self.buffer as usize);
+            let offset = (((self.buffer as usize) + layout.align() - 1) & !layout.align())
+                - (self.buffer as usize);
             (
                 Some(KernAllocation {
                     buffer: (self.buffer as usize + offset) as *mut u8,
@@ -243,11 +245,14 @@ impl InnerKernelAlloc {
     /// return the new segment so that it can be inserted without recursing the
     /// segment list again.
     fn extend_heap(&mut self, pages: usize) -> Result<*mut KernHeapSegment> {
-        let pa = &mut self.page_allocator.as_deref_mut().ok_or(Error::NoPageAllocator)?;
+        let pa = &mut self
+            .page_allocator
+            .as_deref_mut()
+            .ok_or(Error::NoPageAllocator)?;
         // Allocate the pages, plus one for the management structure
-        let seg = pa
-            .palloc(1 + pages)
-            .and_then(|s| unsafe { (s as *mut KernHeapSegment).as_mut() }.ok_or(Error::InvalidPageReturned))?;
+        let seg = pa.palloc(1 + pages).and_then(|s| {
+            unsafe { (s as *mut KernHeapSegment).as_mut() }.ok_or(Error::InvalidPageReturned)
+        })?;
         let block_start: *mut KernFree =
             ((core::ptr::from_ref(seg) as usize) + 0x1000) as *mut KernFree;
 

@@ -248,21 +248,33 @@ impl MemDriver {
             let ipt = Self::pt_vaddr(self.dynstart.into());
             if (self.dynstart.0 & 0x7fffffffff == 0) && Self::vtop(ipdpt).is_err() {
                 /* Allocate new PDPT */
-                trace!("pdpt mapping: {:#018x}->{:#018x}", self.dynstart.0, self.free_pages[self.ifp].0);
+                trace!(
+                    "pdpt mapping: {:#018x}->{:#018x}",
+                    self.dynstart.0,
+                    self.free_pages[self.ifp].0
+                );
                 Self::map_pdpt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipdpt);
                 self.ifp += 1;
             }
             if (self.dynstart.0 & 0x3fffffff == 0) && Self::vtop(ipde).is_err() {
                 /* Allocate new PDE */
-                trace!("pde mapping: {:#018x}->{:#018x}", self.dynstart.0, self.free_pages[self.ifp].0);
+                trace!(
+                    "pde mapping: {:#018x}->{:#018x}",
+                    self.dynstart.0,
+                    self.free_pages[self.ifp].0
+                );
                 Self::map_pde_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipde);
                 self.ifp += 1;
             }
             if (self.dynstart.0 & 0x1fffff == 0) && Self::vtop(ipt).is_err() {
                 /* Allocate new PT */
-                trace!("pt mapping: {:#018x}->{:#018x}", self.dynstart.0, self.free_pages[self.ifp].0);
+                trace!(
+                    "pt mapping: {:#018x}->{:#018x}",
+                    self.dynstart.0,
+                    self.free_pages[self.ifp].0
+                );
                 Self::map_pt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
                 Self::pinvalidate(ipt);
                 self.ifp += 1;
@@ -344,11 +356,17 @@ impl MemDriver {
          * to an intermediate lookup table not being mapped at all.
          */
         if ptlookup < 0xfffffffffffff000 && Self::vtop(ptlookup).is_err() {
-            Err(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
+            Err(crate::allocator::Error::UnmappedPage {
+                page: inptr,
+                pt: ptlookup,
+            })
         } else {
             unsafe { (ptlookup as *const usize).as_ref() }
                 .filter(|x| (*x & 0x1) == 1) // If !Present, then return Err
-                .ok_or(crate::allocator::Error::UnmappedPage { page: inptr, pt: ptlookup })
+                .ok_or(crate::allocator::Error::UnmappedPage {
+                    page: inptr,
+                    pt: ptlookup,
+                })
                 .map(|x| *x & 0xfffffffffffff000 | (inptr & 0xfff))
         }
     }
@@ -368,8 +386,9 @@ impl MemDriver {
 
                 // Zero out the allocated page (only if mapping a phys page)
                 let pdlookup = ((vaddr as isize) >> (shift - 9)) as usize;
-                let pdpage =
-                    unsafe { core::slice::from_raw_parts_mut((pdlookup & !0xfff) as *mut PDEntry, 0x200) };
+                let pdpage = unsafe {
+                    core::slice::from_raw_parts_mut((pdlookup & !0xfff) as *mut PDEntry, 0x200)
+                };
                 pdpage.fill(crate::paging::PDEntry::new_null());
                 Self::pinvalidate(pdlookup as usize);
             } else {
