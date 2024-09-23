@@ -5,6 +5,7 @@
 mod allocator;
 mod framebuffer;
 mod interrupts;
+mod kernel;
 mod kernel_args;
 mod klog;
 mod memdrv;
@@ -14,11 +15,13 @@ use core::alloc::GlobalAlloc;
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use core::ptr::addr_of_mut;
+use kernel::Kernel;
 use kernel_args::KernelArgs;
 use log::{error, info, trace};
 use snafu::prelude::*;
 use uefi::mem::memory_map::MemoryType;
 
+#[macro_use]
 extern crate alloc;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -36,7 +39,7 @@ fn panic(info: &PanicInfo) -> ! {
 #[derive(Debug, Snafu)]
 enum Error {
     /// Error in Allocator: {source}
-    Allocator { source: allocator::Error }
+    Allocator { source: allocator::Error },
 }
 
 impl From<allocator::Error> for Error {
@@ -59,124 +62,6 @@ global_asm! {
 
 pub static mut GKARG: *mut KernelArgs = core::ptr::null_mut();
 static KLOG: KernLogger = KernLogger;
-
-fn test_vtop(addrs: &[usize]) -> Result<()> {
-    for a in addrs {
-        let phys = MemDriver::vtop(*a).map_err(|x| Error::Allocator { source: x })?;
-        info!("phys: {:#018x}", phys);
-    }
-    Ok(())
-}
-
-fn test_palloc(numpgs: usize) -> Result<()> {
-    let x: *mut u8 = unsafe { MEM_DRIVER.palloc(numpgs) }?;
-    info!("Allocated {} pages @ {:#018x}", numpgs, x as usize);
-
-    // Ignoring any failures from free
-    let _ = unsafe { MEM_DRIVER.pfree(x, numpgs) }?;
-
-    info!("Freed {} pages @ {:#018x}", numpgs, x as usize);
-    Ok(())
-}
-
-fn kernel_start() -> () {
-    // The last address in this list should throw an Err()
-    let testlist = &[0xffffe00000019001, 0xffffe0000001a001, 0xffffe0000001b001, 0xffffd00000000001];
-    if let Err(top_err) = test_vtop(testlist) {
-        error!("Failed calculating physaddr: {}", top_err);
-
-        // Validate that the only failure was the last entry reporting as unmapped
-        if let Error::Allocator { source: allocator::Error::UnmappedPage { page, pt } } = top_err {
-            if page != testlist[testlist.len() - 1] {
-                panic!("Failure unexpected testing page {page:#018x}, {pt:#018x}");
-            }
-        }
-    }
-    info!("vtop tests passed (above error is expected)");
-
-    match test_palloc(300000) {
-        Ok(_) => info!("page alloc tests passed"),
-        Err(e) => {
-            panic!("Page alloc tests failed: {e}");
-        }
-    }
-
-    // Set up the KernelAlloc
-    unsafe { KERN_ALLOC.set_page_allocator(addr_of_mut!(MEM_DRIVER)) };
-
-    info!("Initialized Kernel Allocator");
-
-    unsafe {
-        info!("KERN_ALLOC: {:?}", KERN_ALLOC);
-    }
-
-    let f = &mut [core::ptr::null_mut(); 6097];
-
-    for i in f.iter_mut() {
-        let sz = 43;
-        *i = unsafe { KERN_ALLOC.alloc(core::alloc::Layout::from_size_align_unchecked(sz, 8)) };
-        trace!("Allocated {} bytes: {:#018x}", sz, *i as usize);
-    }
-
-    info!("Done w/ Allocation Test");
-
-    for i in f.iter_mut() {
-        let sz = 43;
-        trace!("Deallocating: {:#018x}", *i as usize);
-        unsafe { KERN_ALLOC.dealloc(*i, core::alloc::Layout::from_size_align_unchecked(sz, 8)) };
-    }
-
-    info!("Finished deallocation");
-
-    let mut v = Vec::new();
-    v.push(999999999usize);
-    v.push(0usize);
-    v.push(104usize);
-
-    info!("v: {:?}", &v);
-
-    let mut bt = BTreeMap::new();
-    bt.insert("helllo", "foobar");
-    bt.insert("welcome", "you are");
-    bt.insert("ninety", "nine");
-
-    info!("bt: {:?}", &bt);
-
-    let gdt: [crate::interrupts::GlobalDescriptorEntry; 3] = [
-        crate::interrupts::GlobalDescriptorEntry::new_null(),
-        crate::interrupts::GlobalDescriptorEntry::new_codeseg(0),
-        crate::interrupts::GlobalDescriptorEntry::new_dataseg(0),
-    ];
-    let gdtr = crate::interrupts::Gdtr::new(&gdt);
-
-    info!("gdtr: {:#034x}", u128::from(&gdtr));
-
-    for (ii, gg) in gdt.iter().enumerate() {
-        info!("GDT{:#04x}: {:#036x}", ii, u128::from(gg));
-    }
-
-    unsafe {
-    asm!(
-        "lgdt [{}]",
-        "mov ax, 32",
-        "mov ds, ax",
-        "mov ss, ax",
-        "mov es, ax",
-        "mov fs, ax",
-        "mov gs, ax",
-        "mov rax, 16",
-        "push rax",
-        "lea rax, [22f + rip]",
-        "push rax",
-        "retfq",
-        "22:",
-        in(reg) &gdtr,
-        //in(reg) stage_two,
-        options(readonly, nostack, preserves_flags)
-    );
-    };
-    panic!("End of kernel execution");
-}
 
 #[no_mangle]
 fn kernmain(karg: &mut KernelArgs) -> ! {
@@ -213,5 +98,10 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
 
     // Execute the next phase of kernel start-up on the new stack we just
     // allocated
-    unsafe { psm::replace_stack(kernstack, 4096*1024, kernel_start) };
+    unsafe {
+        psm::replace_stack(kernstack, 4096 * 1024, || {
+            let mut k = Kernel::new();
+            k.start();
+        })
+    };
 }
