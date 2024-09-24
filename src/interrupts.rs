@@ -239,9 +239,7 @@ impl InterruptDescriptorEntry {
                 | (pl as u128 | 4) << 45,
         )
     }
-}
 
-impl InterruptDescriptorEntry {
     pub fn new_int(offset: usize, seg: u16, pl: u8, ist: u8) -> Self {
         Self(
             (offset as u128 & 0xffff)
@@ -327,7 +325,10 @@ impl Idtr {
 
     pub fn lidt(&self) {
         unsafe {
-            asm!("", options(readonly, nostack, preserves_flags));
+            asm!(
+                "lidt [{}]",
+                in(reg) self
+            );
         };
     }
 }
