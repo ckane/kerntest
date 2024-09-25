@@ -19,6 +19,14 @@ pub struct Kernel {
     ist: InterruptStackTable,
 }
 
+fn int3_panic() -> ! {
+    panic!("INT3 fired!")
+}
+
+fn df_panic() -> ! {
+    panic!("Double fault fired!")
+}
+
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
     /// Error in Allocator: {source}
@@ -41,13 +49,18 @@ impl Kernel {
         info!("Initialized Kernel Allocator");
 
         info!("Allocating new kernel");
-        let idt = vec![InterruptDescriptorEntry::default(); 256];
+
+        // Initialize the IDT and register some handlers
+        let mut idt = vec![InterruptDescriptorEntry::default(); 256];
+        idt[3] = InterruptDescriptorEntry::new_trap(int3_panic as usize, 0x10, 0, 1);
+        idt[8] = InterruptDescriptorEntry::new_trap(df_panic as usize, 0x10, 0, 0);
+
         Self {
             // Will delay the construction of the GDT until later on when
             // ready to LGDT
             gdtr: Gdtr::new(&[]),
             gdt: Vec::new(),
-            idtr: Idtr::new(&idt),
+            idtr: Idtr::new(idt.as_slice()),
             idt: idt,
             ist: InterruptStackTable::default(),
         }
@@ -79,12 +92,15 @@ impl Kernel {
 
         if let (Some(istp), istlen) = (self.ist.get_ist_ptr(), self.ist.get_ist_len_bytes()) {
             self.gdt.push(GlobalDescriptorEntry::new_istseg(istp as usize, istlen));
+            info!("IST pointer: {:#018x}", istp as usize);
         } else {
             panic!("IST failed to initialize or is corrupted");
         }
         self.gdtr = Gdtr::new(&self.gdt);
 
         info!("gdtr: {:#022x}", u128::from(&self.gdtr));
+        info!("idt : {:#018x}", self.idt.as_ptr() as usize);
+        info!("idtr: {:#022x}", u128::from(&self.idtr));
 
         for (ii, gg) in self.gdt.iter().enumerate() {
             info!("GDT{:#04x}: {:#034x}", ii, u128::from(gg));
@@ -101,7 +117,20 @@ impl Kernel {
     }
 
     fn initialize_ist(&mut self) {
+        info!("IST: {:?}", self.ist);
         info!("Initialized new IST");
+    }
+
+    fn initialize_idt(&mut self) {
+        self.idtr.lidt();
+        info!("Initialized IDT");
+        for i in 0..self.idt.len() {
+            let ent = u128::from(&self.idt[i]);
+            if ent != 0 {
+                info!("IDT entry: {:#034x}", ent);
+            }
+        }
+        info!("Idt addr: {:#018x}", self.idt.as_mut_ptr() as usize);
     }
 
     pub fn start(&mut self) {
@@ -175,6 +204,12 @@ impl Kernel {
 
         self.initialize_gdt();
         self.initialize_ist();
+        self.initialize_idt();
+
+        unsafe {asm!(
+            "int3",
+            options(nomem, nostack)
+        )};
 
         panic!("End of kernel execution");
     }
