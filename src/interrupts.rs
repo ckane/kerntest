@@ -20,10 +20,10 @@ pub(crate) struct InterruptStackTable {
     entries: Vec<u32>,
 
     /// The stacks for the 7 IST entries
-    ists: Vec<Vec<u8>>,
+    ists: Vec<Vec<u128>>,
 
     /// The stacks for the 3 RSP entries for PL changes
-    rsps: Vec<Vec<u8>>,
+    rsps: Vec<Vec<u128>>,
 }
 
 impl<'a> From<&'a InterruptStackTable> for &'a [u32] {
@@ -51,8 +51,8 @@ impl Default for InterruptStackTable {
 
         let mut new_self = Self {
             entries: entries_vec,
-            ists: vec![vec![0; IST_STACK_SIZE]; 7],
-            rsps: vec![vec![0; IST_STACK_SIZE]; 3],
+            ists: vec![vec![0; IST_STACK_SIZE / 16]; 7],
+            rsps: vec![vec![0; IST_STACK_SIZE / 16]; 3],
         };
 
         // Iterate across each of the 3 privilege-change stacks, and write their address into the
@@ -144,36 +144,36 @@ impl InterruptStackTable {
 
     pub fn set_rsp(&mut self, dpl: ISTPrivilegeStack, addr: usize) {
         let rsp = dpl as usize;
-        self.entries[rsp + 1] = (addr & 0xffffffff) as u32;
-        self.entries[rsp + 2] = ((addr >> 32) & 0xffffffff) as u32;
+        self.entries[rsp * 2 + 1] = (addr & 0xffffffff) as u32;
+        self.entries[rsp * 2 + 2] = ((addr >> 32) & 0xffffffff) as u32;
     }
 
     pub fn get_rsp(&self, dpl: ISTPrivilegeStack) -> usize {
         let rsp = dpl as usize;
-        (self.entries[rsp + 1] as usize) | ((self.entries[rsp + 2] as usize) << 32)
+        (self.entries[rsp * 2 + 1] as usize) | ((self.entries[rsp * 2 + 2] as usize) << 32)
     }
 
     pub fn set_ist(&mut self, index: ISTStacks, addr: usize) {
         let ist = index as usize;
-        self.entries[ist + 9] = (addr & 0xffffffff) as u32;
-        self.entries[ist + 10] = ((addr >> 32) & 0xffffffff) as u32;
+        self.entries[ist * 2 + 9] = (addr & 0xffffffff) as u32;
+        self.entries[ist * 2 + 10] = ((addr >> 32) & 0xffffffff) as u32;
     }
 
     pub fn get_ist(&self, index: ISTStacks) -> usize {
         let ist = index as usize;
-        (self.entries[ist + 9] as usize) | ((self.entries[ist + 10] as usize) << 32)
+        (self.entries[ist * 2 + 9] as usize) | ((self.entries[ist * 2 + 10] as usize) << 32)
     }
 
     /// Returns Some(()) if port is permitted in IOPB, and None if not permitted
     pub fn get_iop(&self, port: u16) -> Option<()> {
-        ((self.entries[(port as usize) / 32] >> (port as usize % 8)) & 0x1 == 0).then(|| ())
+        ((self.entries[IOPB_OFFSET as usize + (port as usize) / 32] >> (port as usize % 8)) & 0x1 == 0).then(|| ())
     }
 
     /// Set whether a port in the IOPB is enabled or disabled
     pub fn set_iop(&mut self, port: u16, enable: bool) {
         match enable {
-            true => self.entries[(port as usize) / 32] &= !1 << (port as usize % 8),
-            false => self.entries[(port as usize) / 32] |= 1 << (port as usize % 8),
+            true => self.entries[IOPB_OFFSET as usize + (port as usize) / 32] &= !1 << (port as usize % 8),
+            false => self.entries[IOPB_OFFSET as usize + (port as usize) / 32] |= 1 << (port as usize % 8),
         }
     }
 
@@ -233,7 +233,9 @@ impl InterruptDescriptorEntry {
                 | (seg as u128) << 16
                 | (ist as u128) << 32
                 | (0xf << 40)
-                | (pl as u128 | 4) << 45,
+                | (pl as u128 | 4) << 45
+                | (1 as u128) << 47 // +P
+                | (offset as u128 & 0xffffffffffff0000) << 32,
         )
     }
 
@@ -243,7 +245,9 @@ impl InterruptDescriptorEntry {
                 | (seg as u128) << 16
                 | (ist as u128) << 32
                 | (0xe << 40)
-                | (pl as u128 | 4) << 45,
+                | (pl as u128 | 4) << 45
+                | (1 as u128) << 47 // +P
+                | (offset as u128 & 0xffffffffffff0000) << 32,
         )
     }
 }
@@ -270,10 +274,9 @@ impl GlobalDescriptorEntry {
     pub fn new_istseg(addr: usize, len: usize) -> Self {
         Self(
             0x89 << 40  | // Access: +P, +Avl (64b IST)
-            ((addr as u128 & !0xffffff) << 32) | // Base[3]
+            ((addr as u128 & !0xffffff) << 32) | // Base[32..64]
             ((len as u128 - 1) & 0xff0000) | // Limit[4] (len - 1)
-            ((len as u128 - 1) & 0xff0000) | // Limit[4] (len - 1)
-            ((addr as u128 & 0xffff) << 16) | // Base[0..3]
+            ((addr as u128 & 0xffffff) << 16) | // Base[0..5]
             ((len as u128 - 1) & 0xffff), // Limit[0..4] (len - 1)
         )
     }
