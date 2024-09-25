@@ -72,8 +72,9 @@ impl Default for InterruptStackTable {
             ISTPrivilegeStack::RSP1,
             ISTPrivilegeStack::RSP2,
         ] {
-            info!("Setting RSP{}", usize::from(r));
-            let addr = new_self.rsps[usize::from(r)].as_mut_ptr() as usize;
+            let mut addr = new_self.rsps[usize::from(r)].as_mut_ptr() as usize;
+            addr += new_self.rsps[usize::from(r)].len() * 16 - 1;
+            addr &= !0xf;
             new_self.set_rsp(r, addr);
         }
 
@@ -88,8 +89,9 @@ impl Default for InterruptStackTable {
             ISTStacks::IST6,
             ISTStacks::IST7,
         ] {
-            info!("Setting IST{}", usize::from(i));
-            let addr = new_self.ists[usize::from(i) - 1].as_mut_ptr() as usize;
+            let mut addr = new_self.ists[usize::from(i) - 1].as_mut_ptr() as usize;
+            addr += new_self.ists[usize::from(i) - 1].len() * 16 - 1;
+            addr &= !0xf;
             new_self.set_ist(i, addr);
         }
 
