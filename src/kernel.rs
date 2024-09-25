@@ -1,6 +1,7 @@
 use crate::allocator::{PageAllocator, KERN_ALLOC};
 use crate::interrupts::{
-    Gdtr, GlobalDescriptorEntry, Idtr, InterruptDescriptorEntry, InterruptStackTable,
+    Gdtr, GlobalDescriptorEntry, Idtr, InterruptDescriptorEntry, InterruptStack,
+    InterruptStackTable,
 };
 use crate::memdrv::{MemDriver, MEM_DRIVER};
 use alloc::collections::BTreeMap;
@@ -19,12 +20,14 @@ pub struct Kernel {
     ist: InterruptStackTable,
 }
 
-fn int3_panic() -> ! {
-    panic!("INT3 fired!")
+extern "x86-interrupt"
+fn int3_panic(frame: InterruptStack) {
+    error!("Breakpoint @ {:?}", frame);
+    // This "fault" is recoverable
 }
 
-fn df_panic() -> ! {
-    panic!("Double fault fired!")
+fn df_panic(frame: InterruptStack) -> ! {
+    panic!("Double fault @ {:?}", frame)
 }
 
 #[derive(Debug, Snafu)]

@@ -28,6 +28,25 @@ pub(crate) struct InterruptStackTable {
     rsps: Vec<Vec<u128>>,
 }
 
+/// Stack frame for interrupt routines. Must be declared repr(C) so that its contents
+/// can be mapped onto a C-like data layout
+#[derive(Clone)]
+#[repr(C)]
+pub struct InterruptStack {
+    rip: u64,
+    cs: u16,
+    rfl: u64,
+    rsp: u64,
+    ss: u16
+}
+
+impl core::fmt::Debug for InterruptStack {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
+        write!(fmt, "{{ rip: {:#018x}, cs: {:#06x}, rflags: {:#018x}, rsp: {:#018x}, ss: {:#06x} }}",
+            self.rip, self.cs, self.rfl, self.rsp, self.ss)
+    }
+}
+
 #[derive(Debug, Snafu)]
 pub(crate) enum Error {
     /// Data or Type conversion error
