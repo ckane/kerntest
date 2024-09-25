@@ -29,7 +29,7 @@ pub(crate) enum Error {
     UnmappedPage { page: usize, pt: usize },
 }
 
-pub type Result<T> = core::result::Result<T, Error>;
+pub(crate) type Result<T> = core::result::Result<T, Error>;
 
 /// Trait to describe implementation of the PageAllocator.
 /// Defines an object that the caller can request new pages

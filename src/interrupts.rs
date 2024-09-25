@@ -1,5 +1,7 @@
 use alloc::vec::Vec;
 use core::arch::asm;
+use core::fmt::write;
+use snafu::Snafu;
 use log::info;
 
 #[derive(Copy, Clone)]
@@ -25,6 +27,14 @@ pub(crate) struct InterruptStackTable {
     /// The stacks for the 3 RSP entries for PL changes
     rsps: Vec<Vec<u128>>,
 }
+
+#[derive(Debug, Snafu)]
+pub(crate) enum Error {
+    /// Data or Type conversion error
+    ConversionError,
+}
+
+pub(crate) type Result<T> = core::result::Result<T, Error>;
 
 impl<'a> From<&'a InterruptStackTable> for &'a [u32] {
     fn from(ist: &InterruptStackTable) -> &[u32] {
@@ -89,14 +99,14 @@ impl Default for InterruptStackTable {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum ISTPrivilegeStack {
     RSP0,
     RSP1,
     RSP2,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum ISTStacks {
     IST1,
     IST2,
@@ -105,6 +115,34 @@ enum ISTStacks {
     IST5,
     IST6,
     IST7,
+}
+
+impl TryFrom<usize> for ISTPrivilegeStack {
+    type Error = Error;
+    fn try_from(v: usize) -> Result<Self> {
+        match v {
+            0 => Ok(ISTPrivilegeStack::RSP0),
+            1 => Ok(ISTPrivilegeStack::RSP1),
+            2 => Ok(ISTPrivilegeStack::RSP2),
+            _ => Err(Error::ConversionError),
+        }
+    }
+}
+
+impl TryFrom<usize> for ISTStacks {
+    type Error = Error;
+    fn try_from(v: usize) -> Result<Self> {
+        match v {
+            1 => Ok(ISTStacks::IST1),
+            2 => Ok(ISTStacks::IST2),
+            3 => Ok(ISTStacks::IST3),
+            4 => Ok(ISTStacks::IST4),
+            5 => Ok(ISTStacks::IST5),
+            6 => Ok(ISTStacks::IST6),
+            7 => Ok(ISTStacks::IST7),
+            _ => Err(Error::ConversionError),
+        }
+    }
 }
 
 impl From<ISTPrivilegeStack> for usize {
@@ -187,6 +225,34 @@ impl InterruptStackTable {
         for block in (IOPB_OFFSET as usize)..self.entries.len() {
             self.entries[block] = 0xffffffff;
         }
+    }
+}
+
+impl core::fmt::Debug for InterruptStackTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
+        write!(f, "{{ ")?;
+        for i in [
+            ISTStacks::IST1,
+            ISTStacks::IST2,
+            ISTStacks::IST3,
+            ISTStacks::IST4,
+            ISTStacks::IST5,
+            ISTStacks::IST6,
+            ISTStacks::IST7,
+        ] {
+            write!(f, "IST{}: {:#018x}, ", usize::from(i), self.get_ist(i))?;
+        };
+
+        for r in [
+            ISTPrivilegeStack::RSP0,
+            ISTPrivilegeStack::RSP1,
+            ISTPrivilegeStack::RSP2,
+        ] {
+            write!(f, "RSP{}: {:#018x}, ", usize::from(r), self.get_rsp(r))?;
+        };
+        write!(f, " }}")?;
+
+        Ok(())
     }
 }
 
