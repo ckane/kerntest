@@ -16,6 +16,8 @@ pub(crate) struct Idtr(u128);
 #[derive(Copy, Clone)]
 pub(crate) struct InterruptDescriptorEntry(u128);
 
+/// Encapsulates an Interrupt Stack Table (IST / TSS) as well as manages the stacks
+/// pointed at by it
 #[derive(Clone)]
 pub(crate) struct InterruptStackTable {
     /// The 32 bit entries comprising the IST, including its IOPB
@@ -41,6 +43,7 @@ pub struct InterruptStack {
 }
 
 impl core::fmt::Debug for InterruptStack {
+    /// Write out the contents of an InterruptStack
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
         write!(fmt, "{{ rip: {:#018x}, cs: {:#06x}, rflags: {:#018x}, rsp: {:#018x}, ss: {:#06x} }}",
             self.rip, self.cs, self.rfl, self.rsp, self.ss)
@@ -56,6 +59,7 @@ pub(crate) enum Error {
 pub(crate) type Result<T> = core::result::Result<T, Error>;
 
 impl<'a> From<&'a InterruptStackTable> for &'a [u32] {
+    /// Implement conversion between IST and a u32 slice reference
     fn from(ist: &InterruptStackTable) -> &[u32] {
         &ist.entries
     }
