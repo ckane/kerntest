@@ -132,11 +132,8 @@ impl From<ISTStacks> for usize {
 }
 
 impl InterruptStackTable {
-    pub fn get_ist_len_bytes(&self) -> Option<usize> {
-        match self.entries.len() {
-            0 => None,
-            x => Some(x * 4),
-        }
+    pub fn get_ist_len_bytes(&self) -> usize {
+        self.entries.len() * 4
     }
     pub fn get_ist_ptr(&mut self) -> Option<*mut u32> {
         match self.entries.len() {

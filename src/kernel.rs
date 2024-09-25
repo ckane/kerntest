@@ -77,7 +77,7 @@ impl Kernel {
         self.gdt.push(GlobalDescriptorEntry::new_codeseg(0));
         self.gdt.push(GlobalDescriptorEntry::new_dataseg(0));
 
-        if let (Some(istp), Some(istlen)) = (self.ist.get_ist_ptr(), self.ist.get_ist_len_bytes()) {
+        if let (Some(istp), istlen) = (self.ist.get_ist_ptr(), self.ist.get_ist_len_bytes()) {
             self.gdt.push(GlobalDescriptorEntry::new_istseg(istp as usize, istlen));
         } else {
             panic!("IST failed to initialize or is corrupted");
