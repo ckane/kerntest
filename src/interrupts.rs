@@ -4,15 +4,27 @@ use core::fmt::write;
 use snafu::Snafu;
 use log::info;
 
+/// Value to load into GDTR. Implemented as a 128-bit value, but only
+/// the lower 80 bits are used (16b length + 64b base). Implements some
+/// helper methods for constructing the register value.
 #[derive(Copy, Clone)]
 pub(crate) struct Gdtr(u128);
 
+/// Entry in the Global Descriptor Table, implemented as a 128-bit value.
+/// Even though selector descriptor entries can still be 64 bit, system
+/// selector entries are 128 bit. To retain consistency, we just pretend the
+/// segment selectors take up 128 bits too, and leave the ones empty that
+/// are indexed by values ending in 8.
 #[derive(Copy, Clone)]
 pub(crate) struct GlobalDescriptorEntry(u128);
 
+/// Value to load into IDTR. Implemented as a 128-bit value, but only
+/// the lower 80 bits are used (16b length + 64b base). Implements some
+/// helper methods for constructing the register value.
 #[derive(Copy, Clone)]
 pub(crate) struct Idtr(u128);
 
+/// An interrupt descriptor in the IDT
 #[derive(Copy, Clone)]
 pub(crate) struct InterruptDescriptorEntry(u128);
 
@@ -318,7 +330,8 @@ impl Default for GlobalDescriptorEntry {
 }
 
 impl InterruptDescriptorEntry {
-    pub fn new_trap(offset: usize, seg: u16, pl: u8, ist: u8) -> Self {
+    pub fn new_trap(func: extern "x86-interrupt" fn(InterruptStack), seg: u16, pl: u8, ist: u8) -> Self {
+        let offset = func as usize;
         Self(
             (offset as u128 & 0xffff)
                 | (seg as u128) << 16

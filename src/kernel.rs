@@ -1,4 +1,5 @@
 use crate::allocator::{PageAllocator, KERN_ALLOC};
+use crate::exceptions::attach_exceptions;
 use crate::interrupts::{
     Gdtr, GlobalDescriptorEntry, Idtr, InterruptDescriptorEntry, InterruptStack,
     InterruptStackTable,
@@ -18,16 +19,6 @@ pub struct Kernel {
     idtr: Idtr,
     idt: Vec<InterruptDescriptorEntry>,
     ist: InterruptStackTable,
-}
-
-extern "x86-interrupt"
-fn int3_panic(frame: InterruptStack) {
-    error!("Breakpoint @ {:?}", frame);
-    // This "fault" is recoverable
-}
-
-fn df_panic(frame: InterruptStack) -> ! {
-    panic!("Double fault @ {:?}", frame)
 }
 
 #[derive(Debug, Snafu)]
@@ -55,8 +46,7 @@ impl Kernel {
 
         // Initialize the IDT and register some handlers
         let mut idt = vec![InterruptDescriptorEntry::default(); 256];
-        idt[3] = InterruptDescriptorEntry::new_trap(int3_panic as usize, 0x10, 0, 1);
-        idt[8] = InterruptDescriptorEntry::new_trap(df_panic as usize, 0x10, 0, 0);
+        attach_exceptions(&mut idt);
 
         Self {
             // Will delay the construction of the GDT until later on when

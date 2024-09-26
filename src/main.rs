@@ -4,6 +4,7 @@
 #![feature(abi_x86_interrupt)]
 
 mod allocator;
+mod exceptions;
 mod framebuffer;
 mod interrupts;
 mod kernel;
