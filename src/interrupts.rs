@@ -343,7 +343,8 @@ impl InterruptDescriptorEntry {
         )
     }
 
-    pub fn new_int(offset: usize, seg: u16, pl: u8, ist: u8) -> Self {
+    pub fn new_int(func: extern "x86-interrupt" fn(InterruptStack), seg: u16, pl: u8, ist: u8) -> Self {
+        let offset = func as usize;
         Self(
             (offset as u128 & 0xffff)
                 | (seg as u128) << 16
