@@ -115,6 +115,8 @@ impl Kernel {
     }
 
     fn initialize_idt(&mut self) {
+        self.idtr.disable_legacy_pic();
+        info!("Disabled Legacy PIC");
         self.idtr.lidt();
         info!("Initialized IDT");
         for i in 0..self.idt.len() {

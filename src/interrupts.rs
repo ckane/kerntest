@@ -444,6 +444,18 @@ impl Idtr {
         )
     }
 
+    pub fn disable_legacy_pic(&self) {
+        unsafe {
+            asm!(
+                "push rax",
+                "mov al, 0xff",
+                "out 0x21, al",
+                "out 0xa1, al",
+                "pop rax",
+            );
+        }
+    }
+
     pub fn lidt(&self) {
         unsafe {
             asm!(
