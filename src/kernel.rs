@@ -195,9 +195,9 @@ impl Kernel {
         info!("v: {:?}", &v);
 
         let mut bt = BTreeMap::new();
-        bt.insert("helllo", "foobar").ok_or(Error::AllocatorTest { description: String::from("Failed inserting \"hello\"") })?;
-        bt.insert("welcome", "you are").ok_or(Error::AllocatorTest { description: String::from("Failed inserting \"you are\"") })?;
-        bt.insert("ninety", "nine").ok_or(Error::AllocatorTest { description: String::from("Failed inserting \"ninety\"") })?;
+        bt.insert("helllo", "foobar");
+        bt.insert("welcome", "you are");
+        bt.insert("ninety", "nine");
 
         info!("bt: {:?}", &bt);
 
