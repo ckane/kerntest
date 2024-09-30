@@ -209,7 +209,9 @@ impl Kernel {
         info!("Starting kernel instance");
 
         // Perform allocator validation
-        self.test_allocator();
+        if let Err(Error::AllocatorTest { description }) = self.test_allocator() {
+            panic!("Allocator testing failed: {}", description)
+        }
 
         self.initialize_gdt();
         self.initialize_ist();
