@@ -6,6 +6,7 @@ use crate::interrupts::{
 };
 use crate::memdrv::{MemDriver, MEM_DRIVER};
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::GlobalAlloc;
 use core::arch::asm;
@@ -25,6 +26,9 @@ pub struct Kernel {
 pub(crate) enum Error {
     /// Error in Allocator: {source}
     Allocator { source: crate::allocator::Error },
+
+    /// Errors produced while testing Allocator
+    AllocatorTest { description: String },
 }
 
 impl From<crate::allocator::Error> for Error {
@@ -128,9 +132,7 @@ impl Kernel {
         info!("Idt addr: {:#018x}", self.idt.as_mut_ptr() as usize);
     }
 
-    pub fn start(&mut self) {
-        // The last address in this list should throw an Err()
-        info!("Starting kernel instance");
+    fn test_allocator(&mut self) -> Result<()> {
         let testlist = &[
             0xffffe00000019001,
             0xffffe0000001a001,
@@ -146,28 +148,30 @@ impl Kernel {
             } = top_err
             {
                 if page != testlist[testlist.len() - 1] {
-                    panic!("Failure unexpected testing page {page:#018x}, {pt:#018x}");
+                    Err(Error::AllocatorTest {
+                        description: format!("Failure unexpected testing page {page:#018x}, {pt:#018x}")
+                    })?
                 }
             }
         }
         info!("vtop tests passed (above error is expected)");
 
-        match Self::test_palloc(300000) {
-            Ok(_) => info!("page alloc tests passed"),
-            Err(e) => {
-                panic!("Page alloc tests failed: {e}");
+        Self::test_palloc(300000).map_err(|e| {
+            Error::AllocatorTest {
+                description: format!("Page alloc tests failed: {e}")
             }
-        }
-
-        unsafe {
-            info!("KERN_ALLOC: {:?}", KERN_ALLOC);
-        }
+        })?;
 
         let f = &mut [core::ptr::null_mut(); 6097];
 
         for i in f.iter_mut() {
             let sz = 43;
             *i = unsafe { KERN_ALLOC.alloc(core::alloc::Layout::from_size_align_unchecked(sz, 8)) };
+            if((*i).is_null()) {
+                Err(Error::AllocatorTest { 
+                    description: format!("Failed to alloc in 6097 loop")
+                })?
+            }
             trace!("Allocated {} bytes: {:#018x}", sz, *i as usize);
         }
 
@@ -191,11 +195,21 @@ impl Kernel {
         info!("v: {:?}", &v);
 
         let mut bt = BTreeMap::new();
-        bt.insert("helllo", "foobar");
-        bt.insert("welcome", "you are");
-        bt.insert("ninety", "nine");
+        bt.insert("helllo", "foobar").ok_or(Error::AllocatorTest { description: String::from("Failed inserting \"hello\"") })?;
+        bt.insert("welcome", "you are").ok_or(Error::AllocatorTest { description: String::from("Failed inserting \"you are\"") })?;
+        bt.insert("ninety", "nine").ok_or(Error::AllocatorTest { description: String::from("Failed inserting \"ninety\"") })?;
 
         info!("bt: {:?}", &bt);
+
+        Ok(())
+    }
+
+    pub fn start(&mut self) {
+        // The last address in this list should throw an Err()
+        info!("Starting kernel instance");
+
+        // Perform allocator validation
+        self.test_allocator();
 
         self.initialize_gdt();
         self.initialize_ist();
