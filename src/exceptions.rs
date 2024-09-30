@@ -45,7 +45,7 @@ fn dna_panic(frame: InterruptStack) {
 }
 
 extern "x86-interrupt"
-fn df_panic(frame: InterruptStack) {
+fn df_panic(frame: InterruptStack, _error_code: u64) {
     panic!("Double fault @ {:?}", frame)
 }
 
@@ -55,28 +55,28 @@ fn cso_panic(frame: InterruptStack) {
 }
 
 extern "x86-interrupt"
-fn tss_panic(frame: InterruptStack) {
-    panic!("Invalid TSS (IST on x64) @ {:?}", frame)
+fn tss_panic(frame: InterruptStack, error_code: u64) {
+    panic!("Invalid TSS (IST on x64), error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
-fn segpres_panic(frame: InterruptStack) {
-    panic!("Segment not Present @ {:?}", frame)
+fn segpres_panic(frame: InterruptStack, error_code: u64) {
+    panic!("Segment not Present, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
-fn stkseg_panic(frame: InterruptStack) {
-    panic!("Stack Segment Fault @ {:?}", frame)
+fn stkseg_panic(frame: InterruptStack, error_code: u64) {
+    panic!("Stack Segment Fault, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
-fn gpf_panic(frame: InterruptStack) {
-    panic!("General Protection Fault @ {:?}", frame)
+fn gpf_panic(frame: InterruptStack, error_code: u64) {
+    panic!("General Protection Fault, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
-fn pf_panic(frame: InterruptStack) {
-    panic!("Page Fault @ {:?}", frame)
+fn pf_panic(frame: InterruptStack, error_code: u64) {
+    panic!("Page Fault, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
@@ -85,8 +85,8 @@ fn fpe_panic(frame: InterruptStack) {
 }
 
 extern "x86-interrupt"
-fn ac_panic(frame: InterruptStack) {
-    panic!("Alignment Check @ {:?}", frame)
+fn ac_panic(frame: InterruptStack, error_code: u64) {
+    panic!("Alignment Check, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
@@ -105,8 +105,8 @@ fn virt_panic(frame: InterruptStack) {
 }
 
 extern "x86-interrupt"
-fn cpe_panic(frame: InterruptStack) {
-    panic!("Control Protection Exception @ {:?}", frame)
+fn cpe_panic(frame: InterruptStack, error_code: u64) {
+    panic!("Control Protection Exception, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
@@ -115,13 +115,13 @@ fn hypinj_panic(frame: InterruptStack) {
 }
 
 extern "x86-interrupt"
-fn vmm_panic(frame: InterruptStack) {
-    panic!("VMM Communications Exception @ {:?}", frame)
+fn vmm_panic(frame: InterruptStack, error_code: u64) {
+    panic!("VMM Communications Exception, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 extern "x86-interrupt"
-fn sec_panic(frame: InterruptStack) {
-    panic!("Security Exception @ {:?}", frame)
+fn sec_panic(frame: InterruptStack, error_code: u64) {
+    panic!("Security Exception, error: {:#018x} @ {:?}", error_code, frame)
 }
 
 pub fn attach_exceptions(idt: &mut Vec<InterruptDescriptorEntry>) {
@@ -150,7 +150,7 @@ pub fn attach_exceptions(idt: &mut Vec<InterruptDescriptorEntry>) {
     idt[7] = InterruptDescriptorEntry::new_trap(dna_panic, 0x10, 0, 2);
 
     // Attach double-fault handler
-    idt[8] = InterruptDescriptorEntry::new_trap(df_panic, 0x10, 0, 1);
+    idt[8] = InterruptDescriptorEntry::new_trap_error_code(df_panic, 0x10, 0, 1);
 
     // Attach coprocessor segment overrun handler
     idt[9] = InterruptDescriptorEntry::new_trap(cso_panic, 0x10, 0, 2);
@@ -159,25 +159,25 @@ pub fn attach_exceptions(idt: &mut Vec<InterruptDescriptorEntry>) {
     idt[9] = InterruptDescriptorEntry::new_trap(cso_panic, 0x10, 0, 2);
 
     // Attach invalid TSS handler
-    idt[10] = InterruptDescriptorEntry::new_trap(tss_panic, 0x10, 0, 2);
+    idt[10] = InterruptDescriptorEntry::new_trap_error_code(tss_panic, 0x10, 0, 2);
 
     // Attach Segment not Present handler
-    idt[11] = InterruptDescriptorEntry::new_trap(segpres_panic, 0x10, 0, 2);
+    idt[11] = InterruptDescriptorEntry::new_trap_error_code(segpres_panic, 0x10, 0, 2);
 
     // Attach Stack Segment Fault handler
-    idt[12] = InterruptDescriptorEntry::new_trap(stkseg_panic, 0x10, 0, 2);
+    idt[12] = InterruptDescriptorEntry::new_trap_error_code(stkseg_panic, 0x10, 0, 2);
 
     // Attach General Protection Fault handler
-    idt[13] = InterruptDescriptorEntry::new_trap(gpf_panic, 0x10, 0, 2);
+    idt[13] = InterruptDescriptorEntry::new_trap_error_code(gpf_panic, 0x10, 0, 2);
 
     // Attach Page Fault handler
-    idt[14] = InterruptDescriptorEntry::new_trap(pf_panic, 0x10, 0, 2);
+    idt[14] = InterruptDescriptorEntry::new_trap_error_code(pf_panic, 0x10, 0, 2);
 
     // Attach x87 FP Exception handler
     idt[16] = InterruptDescriptorEntry::new_trap(fpe_panic, 0x10, 0, 2);
 
     // Attach Alignment Check handler
-    idt[17] = InterruptDescriptorEntry::new_trap(ac_panic, 0x10, 0, 2);
+    idt[17] = InterruptDescriptorEntry::new_trap_error_code(ac_panic, 0x10, 0, 2);
 
     // Attach Machine Check Exception handler
     idt[18] = InterruptDescriptorEntry::new_trap(mce_panic, 0x10, 0, 2);
@@ -189,14 +189,14 @@ pub fn attach_exceptions(idt: &mut Vec<InterruptDescriptorEntry>) {
     idt[20] = InterruptDescriptorEntry::new_trap(virt_panic, 0x10, 0, 2);
 
     // Attach Control Protection Exception handler
-    idt[21] = InterruptDescriptorEntry::new_trap(cpe_panic, 0x10, 0, 2);
+    idt[21] = InterruptDescriptorEntry::new_trap_error_code(cpe_panic, 0x10, 0, 2);
 
     // Attach Hypervisor Injection Exception handler
     idt[28] = InterruptDescriptorEntry::new_trap(hypinj_panic, 0x10, 0, 2);
 
     // Attach VMM Communications Exception handler
-    idt[29] = InterruptDescriptorEntry::new_trap(vmm_panic, 0x10, 0, 2);
+    idt[29] = InterruptDescriptorEntry::new_trap_error_code(vmm_panic, 0x10, 0, 2);
 
     // Attach Security Exception handler
-    idt[30] = InterruptDescriptorEntry::new_trap(sec_panic, 0x10, 0, 2);
+    idt[30] = InterruptDescriptorEntry::new_trap_error_code(sec_panic, 0x10, 0, 2);
 }

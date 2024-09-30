@@ -54,6 +54,9 @@ pub struct InterruptStack {
     ss: u16
 }
 
+pub(crate) type ExceptionFnNoErrorCode = extern "x86-interrupt" fn(InterruptStack);
+pub(crate) type ExceptionFnWithErrorCode = extern "x86-interrupt" fn(InterruptStack, u64);
+
 impl core::fmt::Debug for InterruptStack {
     /// Write out the contents of an InterruptStack
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
@@ -330,7 +333,7 @@ impl Default for GlobalDescriptorEntry {
 }
 
 impl InterruptDescriptorEntry {
-    pub fn new_trap(func: extern "x86-interrupt" fn(InterruptStack), seg: u16, pl: u8, ist: u8) -> Self {
+    pub fn new_trap(func: ExceptionFnNoErrorCode, seg: u16, pl: u8, ist: u8) -> Self {
         let offset = func as usize;
         Self(
             (offset as u128 & 0xffff)
@@ -343,7 +346,20 @@ impl InterruptDescriptorEntry {
         )
     }
 
-    pub fn new_int(func: extern "x86-interrupt" fn(InterruptStack), seg: u16, pl: u8, ist: u8) -> Self {
+    pub fn new_trap_error_code(func: ExceptionFnWithErrorCode, seg: u16, pl: u8, ist: u8) -> Self {
+        let offset = func as usize;
+        Self(
+            (offset as u128 & 0xffff)
+                | (seg as u128) << 16
+                | (ist as u128) << 32
+                | (0xf << 40)
+                | (pl as u128 | 4) << 45
+                | (1 as u128) << 47 // +P
+                | (offset as u128 & 0xffffffffffff0000) << 32,
+        )
+    }
+
+    pub fn new_int(func: ExceptionFnNoErrorCode, seg: u16, pl: u8, ist: u8) -> Self {
         let offset = func as usize;
         Self(
             (offset as u128 & 0xffff)
