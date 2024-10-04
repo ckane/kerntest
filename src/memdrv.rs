@@ -371,8 +371,10 @@ impl MemDriver {
         }
     }
 
-    /// Maps a specific vaddr PTE to a paddr. Expects the PML4, PDPT, PDE,
-    /// and PT to all be existing.
+    /// Generic paging structure mapping utility function. Will accept a physical address
+    /// and a virtual address, and will implement the requested shift and appropriate
+    /// mapping for the paging structure level the shift is requesting the map be
+    /// performed on.
     fn map_any_exact(vaddr: usize, paddr: usize, shift: usize) {
         /* Sign extension is performed when shifting signed values, so convert
          * addresses to isize for the shift, then back to usize afterward.
