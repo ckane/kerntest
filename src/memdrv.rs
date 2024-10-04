@@ -113,7 +113,7 @@ impl PageAllocator for MemDriver {
             Err(crate::allocator::Error::InsufficientFree)
         } else {
             /* Map phys to vmem and return pointer to first vmem page. */
-            self.pmap_at(pages)
+            self.pmap(pages)
         }
     }
 }
@@ -240,7 +240,7 @@ impl MemDriver {
         ((vaddr as isize) >> 9) as usize | 0xffffff8000000000
     }
 
-    fn pmap_at(&mut self, pages: usize) -> crate::allocator::Result<*mut u8> {
+    fn pmap(&mut self, pages: usize) -> crate::allocator::Result<*mut u8> {
         let mapped = self.dynstart.0 as *mut u8;
         for _ in 0..pages {
             let ipdpt = Self::pdpt_vaddr(self.dynstart.into());
