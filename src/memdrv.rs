@@ -4,7 +4,17 @@ use crate::paging::PDEntry;
 use core::arch::asm;
 use core::slice::from_raw_parts_mut;
 use log::{info, trace};
+use snafu::prelude::*;
 use uefi::mem::memory_map::MemoryType;
+
+#[derive(Debug, Snafu)]
+enum Error {
+    /// Collision attempting to map to an already-mapped page.
+    /// vp {vpage:#018x} already maps to pp {ppage:#018x}
+    MapCollision { vpage: usize, ppage: usize }
+}
+
+type Result<T> = core::result::Result<T, Error>;
 
 /*
  * Need to:
