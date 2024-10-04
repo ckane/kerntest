@@ -167,7 +167,7 @@ impl Kernel {
         for i in f.iter_mut() {
             let sz = 43;
             *i = unsafe { KERN_ALLOC.alloc(core::alloc::Layout::from_size_align_unchecked(sz, 8)) };
-            if((*i).is_null()) {
+            if (*i).is_null()  {
                 Err(Error::AllocatorTest { 
                     description: format!("Failed to alloc in 6097 loop")
                 })?
