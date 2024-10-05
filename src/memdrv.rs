@@ -11,7 +11,16 @@ use uefi::mem::memory_map::MemoryType;
 enum Error {
     /// Collision attempting to map to an already-mapped page.
     /// vp {vpage:#018x} already maps to pp {ppage:#018x}
-    MapCollision { vpage: usize, ppage: usize }
+    MapCollision { vpage: usize, ppage: usize },
+
+    /// Insufficient free memory
+    Allocator { source: crate::allocator::Error }
+}
+
+impl From<crate::allocator::Error> for Error {
+    fn from(ae: crate::allocator::Error) -> Self {
+        Self::Allocator { source: ae }
+    }
 }
 
 type Result<T> = core::result::Result<T, Error>;
@@ -432,6 +441,61 @@ impl MemDriver {
     /// to already be existing
     fn map_pdpt_exact(vaddr: usize, paddr: usize) {
         Self::map_any_exact(vaddr, paddr, 36)
+    }
+
+    /// Given a physical and canonical virtual page address, will map the
+    /// physical page to the requested virtual page, and will map the higher
+    /// level structures where necessary. Will return an error if another
+    /// page is already mapped there.
+    pub fn map_vtop(&mut self, vaddr: usize, paddr: usize) -> Result<()> {
+        if let Ok(p) = Self::vtop(vaddr) {
+            Err(Error::MapCollision { vpage: vaddr, ppage: paddr })
+        } else {
+            // If we get here, then we assume it is safe to map any missing
+            // page levels, and the target page can be mapped
+            let ipdpt = Self::pdpt_vaddr(vaddr);
+            let ipde = Self::pde_vaddr(vaddr);
+            let ipt = Self::pt_vaddr(vaddr);
+
+            // To be on the safe side, we will throw an "insufficient free" error if
+            // the available free pages is less than 4 - which would prevent us from
+            // mapping the page plus all intermediate paging structures, if all are
+            // unmapped
+            if self.free_pages.len() - self.ifp < 4 {
+                Err(crate::allocator::Error::InsufficientFree)?
+            }
+
+            // If the associated PDPT is empty, need to map a new one
+            if Self::vtop(ipdpt).is_err() {
+                let next_free = self.free_pages[self.ifp].into();
+                Self::map_pdpt_exact(vaddr, next_free);
+                Self::pinvalidate(ipdpt);
+                self.ifp += 1;
+            }
+
+            // If the associated PDE is empty, need to map a new one
+            if Self::vtop(ipde).is_err() {
+                let next_free = self.free_pages[self.ifp].into();
+                Self::map_pde_exact(vaddr, next_free);
+                Self::pinvalidate(ipde);
+                self.ifp += 1;
+            }
+
+            // If the associated PT is empty, need to map a new one
+            if Self::vtop(ipt).is_err() {
+                let next_free = self.free_pages[self.ifp].into();
+                Self::map_pt_exact(vaddr, next_free);
+                Self::pinvalidate(ipt);
+                self.ifp += 1;
+            }
+
+            // Finally, map the requested phys page to its appropriate vpage in
+            // the (possibly new) PT
+            Self::map_page_exact(vaddr & !0xfff, paddr & !0xfff);
+            Self::pinvalidate(vaddr & !0xfff);
+
+            Ok(())
+        }
     }
 }
 
