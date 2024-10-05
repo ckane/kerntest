@@ -410,7 +410,9 @@ impl MemDriver {
                 let pdpage = unsafe {
                     core::slice::from_raw_parts_mut((pdlookup & !0xfff) as *mut PDEntry, 0x200)
                 };
-                pdpage.fill(crate::paging::PDEntry::new_null());
+                if shift > 9 {
+                    pdpage.fill(crate::paging::PDEntry::new_null());
+                }
                 Self::pinvalidate(pdlookup as usize);
             } else {
                 *p = crate::paging::PDEntry::new_null();
