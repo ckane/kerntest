@@ -208,13 +208,13 @@ impl core::fmt::Debug for InnerKernelAlloc {
             Some(pa) => {
                 write!(
                     f,
-                    "page_allocator: {:?}, kheap: {:?}\n",
+                    "InnerKernelAlloc{{ page_allocator: {:?}, kheap: {:?} }}",
                     core::ptr::from_ref(pa) as *mut u8,
                     self.kheap
                 )
             }
             None => {
-                write!(f, "page_allocator: None, kheap: {:?}\n", self.kheap)
+                write!(f, "InnerKernelAlloc{{ page_allocator: None, kheap: {:?} }}", self.kheap)
             }
         }
     }
