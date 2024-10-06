@@ -18,7 +18,7 @@ impl Log for KernLogger {
         if let Some(f) = rec.file() {
             unsafe { write!((*GKARG).get_fb(), "({}:{}) ", f, rec.line().unwrap_or(0)) }.unwrap();
         };
-        unsafe { write!((*GKARG).get_fb(), "{}\n", rec.args()) }.unwrap();
+        unsafe { writeln!((*GKARG).get_fb(), "{}", rec.args()) }.unwrap();
     }
 
     fn flush(&self) {}
