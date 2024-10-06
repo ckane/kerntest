@@ -72,12 +72,14 @@ impl KernFree {
     /// Attempts to return an allocation, and an optional KernFree remainder, from the
     /// current free block.
     fn alloc_from(&mut self, layout: Layout) -> (Option<KernAllocation>, Option<&mut Self>) {
+        let my_buffer = self.buffer;
         trace!(
-            "self-length: {}, demand: {}, align: {}, min_free: {}",
+            "self-length: {}, demand: {}, align: {}, min_free: {}, buffer: {:#018x}",
             self.length,
             layout.pad_to_align().size(),
             layout.align(),
-            MIN_FREE_SIZE
+            MIN_FREE_SIZE,
+            my_buffer as usize,
         );
         if self.length >= layout.pad_to_align().size() + MIN_FREE_SIZE {
             // If the freeblock is big enough to hold the allocation and also
@@ -94,7 +96,7 @@ impl KernFree {
                 - (self.buffer as usize);
             (
                 Some(KernAllocation {
-                    buffer: (self.buffer as usize + offset) as *mut u8,
+                    buffer: (my_buffer as usize + offset) as *mut u8,
                     length: layout.pad_to_align().size() - offset,
                 }),
                 Some(new_free),
@@ -107,7 +109,7 @@ impl KernFree {
                 - (self.buffer as usize);
             (
                 Some(KernAllocation {
-                    buffer: (self.buffer as usize + offset) as *mut u8,
+                    buffer: (my_buffer as usize + offset) as *mut u8,
                     length: layout.pad_to_align().size() - offset,
                 }),
                 None,
