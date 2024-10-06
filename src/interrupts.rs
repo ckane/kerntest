@@ -7,7 +7,7 @@ use log::info;
 /// Value to load into GDTR. Implemented as a 128-bit value, but only
 /// the lower 80 bits are used (16b length + 64b base). Implements some
 /// helper methods for constructing the register value.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub(crate) struct Gdtr(u128);
 
 /// Entry in the Global Descriptor Table, implemented as a 128-bit value.
@@ -15,17 +15,17 @@ pub(crate) struct Gdtr(u128);
 /// selector entries are 128 bit. To retain consistency, we just pretend the
 /// segment selectors take up 128 bits too, and leave the ones empty that
 /// are indexed by values ending in 8.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub(crate) struct GlobalDescriptorEntry(u128);
 
 /// Value to load into IDTR. Implemented as a 128-bit value, but only
 /// the lower 80 bits are used (16b length + 64b base). Implements some
 /// helper methods for constructing the register value.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub(crate) struct Idtr(u128);
 
 /// An interrupt descriptor in the IDT
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub(crate) struct InterruptDescriptorEntry(u128);
 
 /// Encapsulates an Interrupt Stack Table (IST / TSS) as well as manages the stacks
@@ -44,7 +44,7 @@ pub(crate) struct InterruptStackTable {
 
 /// Stack frame for interrupt routines. Must be declared repr(C) so that its contents
 /// can be mapped onto a C-like data layout
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[repr(C)]
 pub struct InterruptStack {
     rip: u64,
@@ -317,18 +317,6 @@ impl From<&GlobalDescriptorEntry> for u128 {
 impl From<&InterruptDescriptorEntry> for u128 {
     fn from(i: &InterruptDescriptorEntry) -> Self {
         i.0
-    }
-}
-
-impl Default for InterruptDescriptorEntry {
-    fn default() -> Self {
-        Self(0)
-    }
-}
-
-impl Default for GlobalDescriptorEntry {
-    fn default() -> Self {
-        Self(0)
     }
 }
 
