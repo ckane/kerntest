@@ -8,7 +8,7 @@ use snafu::prelude::*;
 use uefi::mem::memory_map::MemoryType;
 
 #[derive(Debug, Snafu)]
-enum Error {
+pub enum Error {
     /// Collision attempting to map to an already-mapped page.
     /// vp {vpage:#018x} already maps to pp {ppage:#018x}
     MapCollision { vpage: usize, ppage: usize },
@@ -331,7 +331,7 @@ impl MemDriver {
         // be mapped to extend the capacity of the page stack.
 
         // Unmap the page
-        Self::map_page_exact(page, 0);
+        Self::unmap_vmap(page);
 
         // Put the physical page back on the page stack
         self.free_pages[self.ifp - 1] = phys.into();
@@ -445,19 +445,55 @@ impl MemDriver {
         Self::map_any_exact(vaddr, paddr, 36)
     }
 
+    fn map_vtop_unconditional(&mut self, vaddr: usize, paddr: usize) {
+        // If we get here, then we assume it is safe to map any missing
+        // page levels, and the target page can be mapped
+        let ipdpt = Self::pdpt_vaddr(vaddr);
+        let ipde = Self::pde_vaddr(vaddr);
+        let ipt = Self::pt_vaddr(vaddr);
+
+        // If the associated PDPT is empty, need to map a new one
+        if Self::vtop(ipdpt).is_err() {
+            let next_free = self.free_pages[self.ifp].into();
+            Self::map_pdpt_exact(vaddr, next_free);
+            Self::pinvalidate(ipdpt);
+            self.ifp += 1;
+        }
+
+        // If the associated PDE is empty, need to map a new one
+        if Self::vtop(ipde).is_err() {
+            let next_free = self.free_pages[self.ifp].into();
+            Self::map_pde_exact(vaddr, next_free);
+            Self::pinvalidate(ipde);
+            self.ifp += 1;
+        }
+
+        // If the associated PT is empty, need to map a new one
+        if Self::vtop(ipt).is_err() {
+            let next_free = self.free_pages[self.ifp].into();
+            Self::map_pt_exact(vaddr, next_free);
+            Self::pinvalidate(ipt);
+            self.ifp += 1;
+        }
+
+        // Finally, map the requested phys page to its appropriate vpage in
+        // the (possibly new) PT
+        Self::map_page_exact(vaddr & !0xfff, paddr & !0xfff);
+        Self::pinvalidate(vaddr & !0xfff);
+    }
+
     /// Given a physical and canonical virtual page address, will map the
     /// physical page to the requested virtual page, and will map the higher
     /// level structures where necessary. Will return an error if another
     /// page is already mapped there.
-    pub fn map_vtop(&mut self, vaddr: usize, paddr: usize) -> Result<()> {
-        if let Ok(p) = Self::vtop(vaddr) {
-            Err(Error::MapCollision { vpage: vaddr, ppage: paddr })
+    pub(crate) fn map_vtop(&mut self, vaddr: usize, paddr: usize) -> Result<()> {
+        if let Ok(oldpaddr) = Self::vtop(vaddr) {
+            match oldpaddr == paddr {
+                // If the requested physpage already matches the current mapping, return success
+                true  => Ok(()),
+                false => Err(Error::MapCollision { vpage: vaddr, ppage: oldpaddr })?
+            }
         } else {
-            // If we get here, then we assume it is safe to map any missing
-            // page levels, and the target page can be mapped
-            let ipdpt = Self::pdpt_vaddr(vaddr);
-            let ipde = Self::pde_vaddr(vaddr);
-            let ipt = Self::pt_vaddr(vaddr);
 
             // To be on the safe side, we will throw an "insufficient free" error if
             // the available free pages is less than 4 - which would prevent us from
@@ -467,37 +503,17 @@ impl MemDriver {
                 Err(crate::allocator::Error::InsufficientFree)?
             }
 
-            // If the associated PDPT is empty, need to map a new one
-            if Self::vtop(ipdpt).is_err() {
-                let next_free = self.free_pages[self.ifp].into();
-                Self::map_pdpt_exact(vaddr, next_free);
-                Self::pinvalidate(ipdpt);
-                self.ifp += 1;
-            }
-
-            // If the associated PDE is empty, need to map a new one
-            if Self::vtop(ipde).is_err() {
-                let next_free = self.free_pages[self.ifp].into();
-                Self::map_pde_exact(vaddr, next_free);
-                Self::pinvalidate(ipde);
-                self.ifp += 1;
-            }
-
-            // If the associated PT is empty, need to map a new one
-            if Self::vtop(ipt).is_err() {
-                let next_free = self.free_pages[self.ifp].into();
-                Self::map_pt_exact(vaddr, next_free);
-                Self::pinvalidate(ipt);
-                self.ifp += 1;
-            }
-
-            // Finally, map the requested phys page to its appropriate vpage in
-            // the (possibly new) PT
-            Self::map_page_exact(vaddr & !0xfff, paddr & !0xfff);
-            Self::pinvalidate(vaddr & !0xfff);
+            self.map_vtop_unconditional(vaddr, paddr);
 
             Ok(())
         }
+    }
+
+    /// Unmap a page without attempting to free its physical page. Useful for unmapping
+    /// mapped MMIO or similar pages, where the underlying physical memory will remain
+    /// excluded from allocatable RAM.
+    pub(crate) fn unmap_vmap(vaddr: usize) {
+        Self::map_page_exact(vaddr & !0xfff, 0);
     }
 }
 
