@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 acpi = { version = "5", features = [ "alloc" ] }
 embedded-graphics = "0.8"
+linkme = "0.3"
 uefi = "0.32"
 log = "0.4"
 psm = "0.1"

@@ -4,6 +4,7 @@
 #![feature(abi_x86_interrupt)]
 
 mod allocator;
+mod driver;
 mod exceptions;
 mod framebuffer;
 mod interrupts;
@@ -31,6 +32,8 @@ use alloc::vec::Vec;
 use allocator::{PageAllocator, KERN_ALLOC};
 use klog::KernLogger;
 use memdrv::{MemDriver, MEM_DRIVER};
+use driver::DriverEntry;
+use linkme::distributed_slice;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
