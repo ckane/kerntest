@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use core::arch::asm;
 use crate::interrupts::{InterruptDescriptorEntry, InterruptStack};
 use log::error;
 
@@ -71,7 +72,14 @@ fn stkseg_panic(frame: InterruptStack, error_code: u64) {
 
 extern "x86-interrupt"
 fn gpf_panic(frame: InterruptStack, error_code: u64) {
-    panic!("General Protection Fault, error: {:#018x} @ {:?}", error_code, frame)
+    let (mut a, mut c) = (0, 0);
+    unsafe { asm!(
+        "mov {},rax",
+        "mov {},rcx",
+        out(reg) a,
+        out(reg) c,
+    ) };
+    panic!("General Protection Fault, error: {:#018x} @ {:?}. RAX: {:#018x}, RCX: {:#018x}", error_code, frame, a, c)
 }
 
 extern "x86-interrupt"
