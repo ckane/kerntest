@@ -3,6 +3,7 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
+mod acpi;
 mod allocator;
 mod driver;
 mod exceptions;

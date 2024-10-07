@@ -1,3 +1,5 @@
+use crate::GKARG;
+use crate::acpi::AcpiDriver;
 use crate::allocator::{PageAllocator, KERN_ALLOC};
 use crate::exceptions::attach_exceptions;
 use crate::interrupts::{
@@ -13,6 +15,8 @@ use core::arch::asm;
 use core::ptr::addr_of_mut;
 use log::{error, info, trace};
 use snafu::prelude::*;
+use alloc::sync::Arc;
+use crate::driver::{DRIVERS, Driver};
 
 pub struct Kernel {
     gdtr: Gdtr,
@@ -20,6 +24,7 @@ pub struct Kernel {
     idtr: Idtr,
     idt: Vec<InterruptDescriptorEntry>,
     ist: InterruptStackTable,
+    drivers: BTreeMap<String, Arc<dyn Driver>>
 }
 
 #[derive(Debug, Snafu)]
@@ -29,11 +34,29 @@ pub(crate) enum Error {
 
     /// Errors produced while testing Allocator
     AllocatorTest { description: String },
+
+    /// ACPI Subsystem error
+    Acpi { acpi_detail: acpi::AcpiError },
+
+    /// Driver subsystem error
+    Driver { source: crate::driver::Error }
+}
+
+impl From<acpi::AcpiError> for Error {
+    fn from(acpierr: acpi::AcpiError) -> Self {
+        Self::Acpi { acpi_detail: acpierr }
+    }
 }
 
 impl From<crate::allocator::Error> for Error {
     fn from(ae: crate::allocator::Error) -> Self {
         Self::Allocator { source: ae }
+    }
+}
+
+impl From<crate::driver::Error> for Error {
+    fn from(drverr: crate::driver::Error) -> Self {
+        Self::Driver { source: drverr }
     }
 }
 
@@ -60,6 +83,7 @@ impl Kernel {
             idtr: Idtr::new(idt.as_slice()),
             idt: idt,
             ist: InterruptStackTable::default(),
+            drivers: BTreeMap::new(),
         }
     }
 
@@ -204,6 +228,27 @@ impl Kernel {
         Ok(())
     }
 
+    fn map_acpi(&mut self) -> Result<()> {
+        for d in DRIVERS.static_slice() {
+            if let Ok(drv) = (d.ctor)() {
+                self.drivers.insert(String::from(d.name), drv);
+            };
+        };
+
+        if let Some(acpi) = self.drivers.get("acpi").clone() {
+            if let Ok(pcie_ecam) = acpi.get("pcie_ecam") {
+                info!("ECAM1 POINTERS: {:?}", pcie_ecam.type_id());
+                if let Some(crate::acpi::AcpiDriverData::EcamPointer(ape)) = pcie_ecam.downcast_ref::<crate::acpi::AcpiDriverData>() {
+                    info!("ECAM POINTERS: {:?}", ape);
+                    for v in ape {
+                        info!("ECAM POINTER: {:?}", v);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn start(&mut self) {
         // The last address in this list should throw an Err()
         info!("Starting kernel instance");
@@ -221,6 +266,10 @@ impl Kernel {
             "int3",
             options(nomem, nostack)
         )};
+
+        if let Err(x) = self.map_acpi() {
+            panic!("ACPI Error: {:?}", x);
+        }
 
         panic!("End of kernel execution");
     }
