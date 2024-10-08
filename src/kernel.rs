@@ -229,7 +229,8 @@ impl Kernel {
     }
 
     fn map_acpi(&mut self) -> Result<()> {
-        for d in DRIVERS.static_slice() {
+        // First load all drivers with no pre-reqs
+        for d in DRIVERS.iter().filter(|x| x.req.len() == 0) {
             if let Ok(drv) = (d.ctor)() {
                 self.drivers.insert(String::from(d.name), drv);
             };
