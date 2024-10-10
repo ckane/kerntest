@@ -85,7 +85,9 @@ impl KernFree {
             // If the freeblock is big enough to hold the allocation and also
             // track another smaller free block, then we need to partition
             // and return the remainder
-            let new_free_ptr = unsafe { self.buffer.add(layout.pad_to_align().size()) };
+            let offset = (((self.buffer as usize) + layout.align() - 1) & !(layout.align() - 1))
+                - (self.buffer as usize);
+            let new_free_ptr = unsafe { self.buffer.add(layout.pad_to_align().size() + offset) };
             let new_free = unsafe { (new_free_ptr as *mut KernFree).as_mut().unwrap() };
             (*new_free) = KernFree {
                 buffer: new_free_ptr,
@@ -97,7 +99,7 @@ impl KernFree {
             (
                 Some(KernAllocation {
                     buffer: (my_buffer as usize + offset) as *mut u8,
-                    length: layout.pad_to_align().size() - offset,
+                    length: layout.pad_to_align().size(),
                 }),
                 Some(new_free),
             )
