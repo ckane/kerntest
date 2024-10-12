@@ -181,7 +181,7 @@ impl MemDriver {
         // This will iterate across the initial page stack, setting up page
         // table entries (as needed) and writing the contents of page_iter into
         // the page stack.
-        for p in self.iter_physpage().take(pages_needed) {
+        for p in self.iter_physpage().take(pages_needed).filter(|&x| x > 0) {
             //trace!("vmem_cursor: {:#018x}", vmem_cursor);
             if vmem_cursor & 0x07fffffffff == 0 {
                 /* Allocate new PDPT */
