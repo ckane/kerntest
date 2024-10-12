@@ -394,7 +394,11 @@ impl GlobalDescriptorEntry {
 impl Gdtr {
     pub fn new(gdt: &[GlobalDescriptorEntry]) -> Self {
         Self(
-            (gdt.len() as u128 * (core::mem::size_of::<GlobalDescriptorEntry>() as u128))
+            if gdt.len() > 0 {
+                (gdt.len() as u128 * (core::mem::size_of::<GlobalDescriptorEntry>() as u128) - 1)
+            } else {
+                0
+            }
                 | (gdt.as_ptr() as u128) << 16,
         )
     }
@@ -427,7 +431,11 @@ impl Gdtr {
 impl Idtr {
     pub fn new(idt: &[InterruptDescriptorEntry]) -> Self {
         Self(
-            (idt.len() as u128 * (core::mem::size_of::<InterruptDescriptorEntry>() as u128))
+            if idt.len() > 0 {
+                (idt.len() as u128 * (core::mem::size_of::<InterruptDescriptorEntry>() as u128) - 1)
+            } else {
+                0
+            }
                 | (idt.as_ptr() as u128) << 16,
         )
     }
