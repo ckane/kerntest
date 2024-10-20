@@ -25,6 +25,32 @@ pub struct UnsafeFrameBuffer {
     format: uefi::proto::console::gop::PixelFormat,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct SimpleFb {
+    configured: bool
+}
+
+impl SimpleFb {
+    pub fn init(fb: &UnsafeFrameBuffer) -> Self {
+        unsafe { BOOT_FRAME_BUFFER = *fb };
+        Self { configured: true }
+    }
+}
+
+static mut BOOT_FRAME_BUFFER: UnsafeFrameBuffer = UnsafeFrameBuffer {
+    fbptr: core::ptr::null_mut(),
+    fx: 0,
+    fy: 0,
+    format: uefi::proto::console::gop::PixelFormat::Rgb,
+    rmask: 0,
+    bmask: 0,
+    gmask: 0,
+    fbsize: 0,
+    stride: 0,
+    txtcur_x: 0,
+    txtcur_y: 0,
+};
+
 impl Default for UnsafeFrameBuffer {
     fn default() -> Self {
         UnsafeFrameBuffer {
@@ -70,6 +96,16 @@ impl DrawTarget for UnsafeFrameBuffer {
             }
         }
         Ok(())
+    }
+}
+
+impl Write for SimpleFb {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        if self.configured {
+            unsafe { BOOT_FRAME_BUFFER.write_str(s) }
+        } else {
+            Ok(())
+        }
     }
 }
 

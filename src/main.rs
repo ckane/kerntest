@@ -19,6 +19,7 @@ use core::alloc::GlobalAlloc;
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use core::ptr::addr_of_mut;
+use framebuffer::SimpleFb;
 use kernel::Kernel;
 use kernel_args::KernelArgs;
 use log::{error, info, trace};
@@ -73,6 +74,8 @@ static KLOG: KernLogger = KernLogger;
 fn kernmain(karg: &mut KernelArgs) -> ! {
     let karg2: KernelArgs = karg.clone();
     unsafe { GKARG = karg };
+    let mut f = SimpleFb::init(unsafe { (*GKARG).get_fb() });
+    KernLogger::set_log_output(&mut f);
     log::set_logger(&KLOG).unwrap();
     log::set_max_level(log::LevelFilter::Debug);
 
