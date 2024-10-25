@@ -87,15 +87,18 @@ impl KernFree {
             // and return the remainder
             let offset = (((self.buffer as usize) + layout.align() - 1) & !(layout.align() - 1))
                 - (self.buffer as usize);
-            let new_free_ptr = unsafe { self.buffer.add(layout.pad_to_align().size() + offset) };
+            let nfp_offset = ((((self.buffer as usize) + layout.pad_to_align().size()) + 7) & !7) - (self.buffer as usize);
+            let new_free_ptr = unsafe { self.buffer.add(nfp_offset) };
+            if new_free_ptr.is_null() {
+                panic!("buffer was null! nfp-{:#018x} b-{:#018x}", new_free_ptr as usize, my_buffer as usize);
+                return (None, Some(self))
+            }
             let new_free = unsafe { (new_free_ptr as *mut KernFree).as_mut().unwrap() };
             (*new_free) = KernFree {
                 buffer: new_free_ptr,
-                length: self.length - layout.pad_to_align().size(),
+                length: self.length - nfp_offset,
                 next: self.next,
             };
-            let offset = (((self.buffer as usize) + layout.align() - 1) & !(layout.align() - 1))
-                - (self.buffer as usize);
             (
                 Some(KernAllocation {
                     buffer: (my_buffer as usize + offset) as *mut u8,
@@ -107,7 +110,7 @@ impl KernFree {
             // If the freeblock is big enough for the allocation, but not a
             // remainder freeblock, then just return the new allocation and
             // discard the remainder.
-            let offset = (((self.buffer as usize) + layout.align() - 1) & !layout.align())
+            let offset = (((self.buffer as usize) + layout.align() - 1) & !(layout.align() - 1))
                 - (self.buffer as usize);
             (
                 Some(KernAllocation {
