@@ -135,7 +135,7 @@ impl AcpiDriver {
             pcie_ecam.push(EcamSegment::from(pcir));
         };
         info!("Ecams: {:?}", pcie_ecam);
-        Ok(pcie_ecam.clone())
+        Ok(pcie_ecam)
     }
 }
 
