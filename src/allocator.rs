@@ -449,6 +449,11 @@ impl InnerKernelAlloc {
                         let b = *a;
                         *a = KernAllocation::default();
 
+                        if b.length < core::mem::size_of::<KernFree>() {
+                            trace!("Freed block (len={}) less than KernFree (len={})", b.length, core::mem::size_of::<KernFree>());
+                            return;
+                        }
+
                         // Then add it back to the free list
                         if let Some(fl) = (*s).freelist {
                             // If it belongs at the head, insert it at the head
