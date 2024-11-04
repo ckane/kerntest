@@ -51,6 +51,9 @@ impl PDEntry {
     pub fn is_ps(&self) -> bool {
         (self.0 & 0x80) != 0
     }
+    pub fn is_wc(&self) -> bool {
+        (self.0 & 0x98) == 0x98
+    }
     pub fn paddr(&self) -> usize {
         self.0 & 0x0fffffffff000
     }
@@ -102,5 +105,8 @@ impl PDEntry {
         } else {
             self.0 &= !0x80
         };
+    }
+    pub fn set_wc(&mut self) {
+        self.0 |= 0x98
     }
 }

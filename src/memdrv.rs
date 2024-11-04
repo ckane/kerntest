@@ -25,6 +25,13 @@ impl From<crate::allocator::Error> for Error {
 
 type Result<T> = core::result::Result<T, Error>;
 
+#[derive(Copy, Clone, Debug)]
+pub enum PatTypes {
+    Normal,
+    Uncacheable,
+    WriteCombining,
+}
+
 /*
  * Need to:
  * Allocate physical pages for new kernel-owned page table
@@ -153,6 +160,9 @@ impl MemDriver {
         self.memmap = SysMemMap::new(karg.get_memmap_slice());
         self.init_recursive();
         self.alloc_pagestack();
+
+        // Update the PAT MTRR
+        Self::update_pat();
     }
 
     fn iter_physpage<'a>(&'a self) -> SysMemMapPageIter<'a> {
@@ -185,24 +195,24 @@ impl MemDriver {
             //trace!("vmem_cursor: {:#018x}", vmem_cursor);
             if vmem_cursor & 0x07fffffffff == 0 {
                 /* Allocate new PDPT */
-                Self::map_pdpt_exact(vmem_cursor, page_iter.next().unwrap());
+                Self::map_pdpt_exact(vmem_cursor, page_iter.next().unwrap(), PatTypes::Normal);
             }
             if vmem_cursor & 0x03fffffff == 0 {
                 /* Allocate new PDE */
                 let pp = page_iter.next().unwrap();
-                Self::map_pde_exact(vmem_cursor, pp);
+                Self::map_pde_exact(vmem_cursor, pp, PatTypes::Normal);
                 info!("pde-mapping: {:#018x}->{:#018x}", vmem_cursor, pp);
             }
             if vmem_cursor & 0x01fffff == 0 {
                 /* Allocate new PT */
                 let pp = page_iter.next().unwrap();
-                Self::map_pt_exact(vmem_cursor, pp);
+                Self::map_pt_exact(vmem_cursor, pp, PatTypes::Normal);
                 info!("pt-mapping: {:#018x}->{:#018x}", vmem_cursor, pp);
             }
             if vmem_cursor & 0x0fff == 0 {
                 /* Map new PTE */
                 Self::pinvalidate(vmem_cursor);
-                Self::map_page_exact(vmem_cursor, p);
+                Self::map_page_exact(vmem_cursor, p, PatTypes::Normal);
                 trace!("mapping: {:#018x}->{:#018x}", vmem_cursor, p);
                 Self::pinvalidate(vmem_cursor);
                 for _ in 0..0x200 {
@@ -233,6 +243,59 @@ impl MemDriver {
         info!("First free page: {:#018x}", firstpg);
         info!("Free pages: {}", self.free_pages.len());
         info!("Dyn start: {:#018x}", self.dynstart.0);
+    }
+
+    /// This updates the PAT MTRR such that PAT=1,PCD=1,PWT=1 is type 0x01 (Write-Combining)
+    fn update_pat() {
+        let mut patreg: u64;
+        // Get the PAT MTRR
+        unsafe { asm!(
+            "mov rcx, 0x277",
+            "rdmsr",
+            // MSR returns in EDX:EAX, so shift RDX left 32 bits
+            // and merge into RAX
+            "shl rdx,32",
+            "or rax,rdx",
+            "mov {},rax",
+            out(reg) patreg,
+        )};
+        trace!("PAT MTRR: {:#018x}", patreg);
+
+        // Modify the PAT to make WC be PAT=1,PCD=1,PWT=1
+        patreg = (patreg & 0x00ffffffffffffff) | 0x0100000000000000;
+
+        // Set the PAT MTRR
+        unsafe { asm!(
+            "mov rcx, 0x0ffffffff",
+            "mov rax, {}",
+            "mov rdx, rax",
+            "and rax, rcx",
+            "shr rdx, 32",
+            "and rdx, rcx",
+            "mov rcx, 0x277",
+            "wrmsr",
+            in(reg) patreg,
+        )};
+
+        info!("PAT MTRR Updated");
+
+        let patcheck: u64;
+        // Get the PAT MTRR
+        unsafe { asm!(
+            "mov rcx, 0x277",
+            "rdmsr",
+            // MSR returns in EDX:EAX, so shift RDX left 32 bits
+            // and merge into RAX
+            "shl rdx,32",
+            "or rax,rdx",
+            "mov {},rax",
+            out(reg) patcheck,
+        )};
+        trace!("PAT MTRR: {:#018x}", patcheck);
+
+        if patcheck != patreg {
+            panic!("PAT MTRR failed to be updated!");
+        }
     }
 
     fn pinvalidate(page: usize) {
@@ -272,7 +335,7 @@ impl MemDriver {
                     self.dynstart.0,
                     self.free_pages[self.ifp].0
                 );
-                Self::map_pdpt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
+                Self::map_pdpt_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
                 Self::pinvalidate(ipdpt);
                 self.ifp += 1;
             }
@@ -283,7 +346,7 @@ impl MemDriver {
                     self.dynstart.0,
                     self.free_pages[self.ifp].0
                 );
-                Self::map_pde_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
+                Self::map_pde_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
                 Self::pinvalidate(ipde);
                 self.ifp += 1;
             }
@@ -294,7 +357,7 @@ impl MemDriver {
                     self.dynstart.0,
                     self.free_pages[self.ifp].0
                 );
-                Self::map_pt_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
+                Self::map_pt_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
                 Self::pinvalidate(ipt);
                 self.ifp += 1;
             }
@@ -313,7 +376,7 @@ impl MemDriver {
              * physical page from the stack. Instead, free the following page and remap
              * its physical page instead.
              */
-            Self::map_page_exact(self.dynstart.into(), self.free_pages[self.ifp].into());
+            Self::map_page_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
             Self::pinvalidate(self.dynstart.into());
             self.ifp += 1;
             self.dynstart = MemPage(self.dynstart.0 + 0x1000);
@@ -394,7 +457,7 @@ impl MemDriver {
     /// and a virtual address, and will implement the requested shift and appropriate
     /// mapping for the paging structure level the shift is requesting the map be
     /// performed on.
-    fn map_any_exact(vaddr: usize, paddr: usize, shift: usize) {
+    fn map_any_exact(vaddr: usize, paddr: usize, shift: usize, pat: PatTypes) {
         /* Sign extension is performed when shifting signed values, so convert
          * addresses to isize for the shift, then back to usize afterward.
          */
@@ -403,6 +466,11 @@ impl MemDriver {
         if let Some(p) = page {
             if paddr > 0 {
                 *p = crate::paging::PDEntry::from_paddr(paddr);
+                match pat {
+                    PatTypes::Normal => {},
+                    PatTypes::Uncacheable => (*p).set_cache_disabled(true),
+                    PatTypes::WriteCombining => (*p).set_wc(),
+                };
                 Self::pinvalidate(ptlookup as usize);
 
                 // Zero out the allocated page (only if mapping a phys page)
@@ -423,29 +491,29 @@ impl MemDriver {
 
     /// Maps a specific vaddr PTE to a paddr. Expects the PML4, PDPT, PDE,
     /// and PT to all be existing.
-    fn map_page_exact(vaddr: usize, paddr: usize) {
-        Self::map_any_exact(vaddr, paddr, 9)
+    fn map_page_exact(vaddr: usize, paddr: usize, pat: PatTypes) {
+        Self::map_any_exact(vaddr, paddr, 9, pat)
     }
 
     /// Maps a specific PT to a paddr. Expects the PML4, PDPT, PDE,
     /// to all already be existing
-    fn map_pt_exact(vaddr: usize, paddr: usize) {
-        Self::map_any_exact(vaddr, paddr, 18)
+    fn map_pt_exact(vaddr: usize, paddr: usize, pat: PatTypes) {
+        Self::map_any_exact(vaddr, paddr, 18, pat)
     }
 
     /// Maps a specific PDE to a paddr. Expects the PML4 & PDPT
     /// to both already be existing
-    fn map_pde_exact(vaddr: usize, paddr: usize) {
-        Self::map_any_exact(vaddr, paddr, 27)
+    fn map_pde_exact(vaddr: usize, paddr: usize, pat: PatTypes) {
+        Self::map_any_exact(vaddr, paddr, 27, pat)
     }
 
     /// Maps a specific PDPT to a paddr. Expects the PML4
     /// to already be existing
-    fn map_pdpt_exact(vaddr: usize, paddr: usize) {
-        Self::map_any_exact(vaddr, paddr, 36)
+    fn map_pdpt_exact(vaddr: usize, paddr: usize, pat: PatTypes) {
+        Self::map_any_exact(vaddr, paddr, 36, pat)
     }
 
-    fn map_vtop_unconditional(&mut self, vaddr: usize, paddr: usize) {
+    fn map_vtop_unconditional(&mut self, vaddr: usize, paddr: usize, pat: PatTypes) {
         // If we get here, then we assume it is safe to map any missing
         // page levels, and the target page can be mapped
         let ipdpt = Self::pdpt_vaddr(vaddr);
@@ -455,7 +523,7 @@ impl MemDriver {
         // If the associated PDPT is empty, need to map a new one
         if Self::vtop(ipdpt).is_err() {
             let next_free = self.free_pages[self.ifp].into();
-            Self::map_pdpt_exact(vaddr, next_free);
+            Self::map_pdpt_exact(vaddr, next_free, PatTypes::Normal);
             Self::pinvalidate(ipdpt);
             self.ifp += 1;
         }
@@ -463,7 +531,7 @@ impl MemDriver {
         // If the associated PDE is empty, need to map a new one
         if Self::vtop(ipde).is_err() {
             let next_free = self.free_pages[self.ifp].into();
-            Self::map_pde_exact(vaddr, next_free);
+            Self::map_pde_exact(vaddr, next_free, PatTypes::Normal);
             Self::pinvalidate(ipde);
             self.ifp += 1;
         }
@@ -471,14 +539,14 @@ impl MemDriver {
         // If the associated PT is empty, need to map a new one
         if Self::vtop(ipt).is_err() {
             let next_free = self.free_pages[self.ifp].into();
-            Self::map_pt_exact(vaddr, next_free);
+            Self::map_pt_exact(vaddr, next_free, PatTypes::Normal);
             Self::pinvalidate(ipt);
             self.ifp += 1;
         }
 
         // Finally, map the requested phys page to its appropriate vpage in
         // the (possibly new) PT
-        Self::map_page_exact(vaddr & !0xfff, paddr & !0xfff);
+        Self::map_page_exact(vaddr & !0xfff, paddr & !0xfff, pat);
         Self::pinvalidate(vaddr & !0xfff);
     }
 
@@ -486,7 +554,7 @@ impl MemDriver {
     /// physical page to the requested virtual page, and will map the higher
     /// level structures where necessary. Will return an error if another
     /// page is already mapped there.
-    pub(crate) fn map_vtop(&mut self, vaddr: usize, paddr: usize) -> Result<()> {
+    pub(crate) fn map_vtop(&mut self, vaddr: usize, paddr: usize, pat: PatTypes) -> Result<()> {
         if let Ok(oldpaddr) = Self::vtop(vaddr) {
             match oldpaddr == paddr {
                 // If the requested physpage already matches the current mapping, return success
@@ -503,7 +571,7 @@ impl MemDriver {
                 Err(crate::allocator::Error::InsufficientFree)?
             }
 
-            self.map_vtop_unconditional(vaddr, paddr);
+            self.map_vtop_unconditional(vaddr, paddr, pat);
 
             Ok(())
         }
@@ -513,7 +581,7 @@ impl MemDriver {
     /// mapped MMIO or similar pages, where the underlying physical memory will remain
     /// excluded from allocatable RAM.
     pub(crate) fn unmap_vmap(vaddr: usize) {
-        Self::map_page_exact(vaddr & !0xfff, 0);
+        Self::map_page_exact(vaddr & !0xfff, 0, PatTypes::Normal);
     }
 }
 
