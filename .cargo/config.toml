@@ -5,7 +5,7 @@ rustflags = [
     #"-Z", "pre-link-arg=-static",
     "-C", "link-arg=--image-base",
     "-C", "link-arg=0xffffe00000000000",
-    "-C", "link-dead-code",
+    "-C", "link-arg=-znostart-stop-gc",
     #"-C", "link-arg=-z",
     #"-C", "link-arg=norelro",
     "-C", "code-model=kernel",
