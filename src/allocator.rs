@@ -588,4 +588,4 @@ static mut INNER_KERN_ALLOC: InnerKernelAlloc = InnerKernelAlloc {
 };
 
 #[global_allocator]
-pub static mut KERN_ALLOC: KernelAlloc = KernelAlloc {};
+pub static KERN_ALLOC: KernelAlloc = KernelAlloc {};
