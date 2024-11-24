@@ -299,12 +299,14 @@ impl MemDriver {
     }
 
     fn pinvalidate(page: usize) {
+        crate::cpu::stop_ints();
         unsafe {
             asm!(
                 "invlpg [{val}]",
                 val = in(reg) page
             )
         }
+        crate::cpu::start_ints();
     }
 
     /// Calculates the PDPT lookup from the provided vaddr
@@ -323,6 +325,7 @@ impl MemDriver {
     }
 
     fn pmap(&mut self, pages: usize) -> crate::allocator::Result<*mut u8> {
+        crate::cpu::stop_ints();
         let mapped = self.dynstart.0 as *mut u8;
         for _ in 0..pages {
             let ipdpt = Self::pdpt_vaddr(self.dynstart.into());
@@ -381,6 +384,7 @@ impl MemDriver {
             self.ifp += 1;
             self.dynstart = MemPage(self.dynstart.0 + 0x1000);
         }
+        crate::cpu::start_ints();
         Ok(mapped)
     }
 
@@ -389,6 +393,7 @@ impl MemDriver {
     /// if it couldn't unmap the page.
     pub fn pmap_free(&mut self, page: usize) -> crate::allocator::Result<usize> {
         let phys = Self::vtop(page)?;
+        crate::cpu::stop_ints();
         // TODO: Similar to palloc, implement logic when we cross a page boundary
         // with the head of the page stack, then the freed physical page needs to
         // be mapped to extend the capacity of the page stack.
@@ -398,6 +403,7 @@ impl MemDriver {
 
         // Put the physical page back on the page stack
         self.free_pages[self.ifp - 1] = phys.into();
+        crate::cpu::start_ints();
         Ok(phys)
     }
 

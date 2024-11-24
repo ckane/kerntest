@@ -44,14 +44,14 @@ pub(crate) struct InterruptStackTable {
 
 /// Stack frame for interrupt routines. Must be declared repr(C) so that its contents
 /// can be mapped onto a C-like data layout
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct InterruptStack {
-    rip: u64,
-    cs: u16,
-    rfl: u64,
-    rsp: u64,
-    ss: u16
+    pub(crate) rip: u64,
+    pub(crate) cs: u64,
+    pub(crate) rfl: u64,
+    pub(crate) rsp: u64,
+    pub(crate) ss: u64,
 }
 
 pub(crate) type ExceptionFnNoErrorCode = extern "x86-interrupt" fn(InterruptStack);

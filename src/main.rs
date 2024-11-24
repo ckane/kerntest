@@ -2,18 +2,26 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![feature(naked_functions)]
 
 mod acpi;
 mod allocator;
+mod cpu;
 mod driver;
 mod exceptions;
 mod framebuffer;
+mod hpet;
 mod interrupts;
 mod kernel;
 mod kernel_args;
 mod klog;
+mod lapic;
 mod memdrv;
 mod paging;
+mod pciexpress;
+mod physmap;
+mod thread;
+mod uefifb;
 
 use core::alloc::GlobalAlloc;
 use core::arch::{asm, global_asm};
@@ -40,7 +48,7 @@ use linkme::distributed_slice;
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     error!("Panic, halting: {}", info);
-    unsafe { asm!("hlt", options(noreturn)) };
+    unsafe { asm!("2:", "hlt", "jmp 2b", options(noreturn)) };
 }
 
 #[derive(Debug, Snafu)]
@@ -63,15 +71,16 @@ type Result<T> = core::result::Result<T, Error>;
 global_asm! {
     ".global _start",
     "_start:",
-    "cli",
     "jmp kernmain",
 }
 
 pub static mut GKARG: *mut KernelArgs = core::ptr::null_mut();
 static KLOG: KernLogger = KernLogger;
+pub static mut KERNEL: Vec<Kernel> = vec![];
 
 #[no_mangle]
 fn kernmain(karg: &mut KernelArgs) -> ! {
+    crate::cpu::stop_ints();
     let karg2: KernelArgs = karg.clone();
     unsafe { GKARG = karg };
     let mut f = SimpleFb::init(unsafe { (*GKARG).get_fb() });
@@ -109,8 +118,9 @@ fn kernmain(karg: &mut KernelArgs) -> ! {
     // allocated
     unsafe {
         psm::replace_stack(kernstack, 4096 * 1024, || {
-            let mut k = Kernel::new();
-            k.start();
+            //let mut k = Kernel::new();
+            unsafe { KERNEL.push(Kernel::new()) };
+            unsafe { KERNEL[0].start() };
         })
     };
 }

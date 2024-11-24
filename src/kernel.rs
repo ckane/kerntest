@@ -1,22 +1,30 @@
-use crate::GKARG;
+use crate::{GKARG, KERNEL, KLOG};
 use crate::acpi::AcpiDriver;
+use crate::cpu::{Processor, add_cpu, add_thread};
 use crate::allocator::{PageAllocator, KERN_ALLOC};
-use crate::exceptions::attach_exceptions;
+use crate::driver::{DRIVERS, Driver, DriverBus, DriverEntry};
+use crate::exceptions::{attach_exceptions, timer_queued};
 use crate::interrupts::{
     Gdtr, GlobalDescriptorEntry, Idtr, InterruptDescriptorEntry, InterruptStack,
     InterruptStackTable,
 };
+use crate::klog::KernLogger;
 use crate::memdrv::{MemDriver, MEM_DRIVER};
-use alloc::collections::BTreeMap;
+use crate::thread::Thread;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::GlobalAlloc;
+use core::any::Any;
 use core::arch::asm;
+use core::fmt::Write;
+use core::ops::Deref;
 use core::ptr::addr_of_mut;
 use log::{error, info, trace};
 use snafu::prelude::*;
+use alloc::boxed::Box;
 use alloc::sync::Arc;
-use crate::driver::{DRIVERS, Driver};
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 pub struct Kernel {
     gdtr: Gdtr,
@@ -24,7 +32,8 @@ pub struct Kernel {
     idtr: Idtr,
     idt: Vec<InterruptDescriptorEntry>,
     ist: InterruptStackTable,
-    drivers: BTreeMap<String, Arc<dyn Driver>>
+    drivers: BTreeMap<String, Arc<dyn Driver>>,
+    cpus: Vec<Processor>,
 }
 
 #[derive(Debug, Snafu)]
@@ -84,6 +93,7 @@ impl Kernel {
             idt: idt,
             ist: InterruptStackTable::default(),
             drivers: BTreeMap::new(),
+            cpus: vec![],
         }
     }
 
@@ -150,7 +160,7 @@ impl Kernel {
         for i in 0..self.idt.len() {
             let ent = u128::from(&self.idt[i]);
             if ent != 0 {
-                info!("IDT entry: {:#034x}", ent);
+                trace!("IDT entry: {:#034x}", ent);
             }
         }
         info!("Idt addr: {:#018x}", self.idt.as_mut_ptr() as usize);
@@ -228,25 +238,41 @@ impl Kernel {
         Ok(())
     }
 
-    fn map_acpi(&mut self) -> Result<()> {
+    fn register_driver(&mut self, d: &DriverEntry) {
+        if let Ok(drv) = (d.ctor)(self) {
+            self.drivers.insert(String::from(d.name), drv);
+            info!("Attached drv <{}> which provides {:?}", d.name, d.provides);
+        }
+    }
+
+    fn map_drivers(&mut self) -> Result<()> {
+        let mut d_provs = BTreeSet::<&str>::new();
+        let mut completed = 0;
+
         // First load all drivers with no pre-reqs
         for d in DRIVERS.iter().filter(|x| x.req.len() == 0) {
-            if let Ok(drv) = (d.ctor)() {
-                self.drivers.insert(String::from(d.name), drv);
+            self.register_driver(d);
+            for p in d.provides {
+                d_provs.insert(p);
+                if String::from(*p) == String::from("log") {
+                    info!("Registering new logger: {}", d.name);
+                }
+            };
+            completed += 1;
+        };
+
+        while completed < DRIVERS.len() {
+            // Then, load all drivers with pre-reqs
+            let d_provs_c = d_provs.clone();
+            for d in DRIVERS.iter().filter(|x| x.req.len() > 0 && x.req.iter().all(|y| d_provs_c.contains(y))) {
+                self.register_driver(d);
+                for p in d.provides {
+                    d_provs.insert(p);
+                };
+                completed += 1;
             };
         };
 
-        if let Some(acpi) = self.drivers.get("acpi").clone() {
-            if let Ok(pcie_ecam) = acpi.get("pcie_ecam") {
-                info!("ECAM1 POINTERS: {:?}", pcie_ecam.type_id());
-                if let Some(crate::acpi::AcpiDriverData::EcamPointer(ape)) = pcie_ecam.downcast_ref::<crate::acpi::AcpiDriverData>() {
-                    info!("ECAM POINTERS: {:?}", ape);
-                    for v in ape {
-                        info!("ECAM POINTER: {:?}", v);
-                    }
-                }
-            }
-        }
         Ok(())
     }
 
@@ -268,10 +294,100 @@ impl Kernel {
             options(nomem, nostack)
         )};
 
-        if let Err(x) = self.map_acpi() {
+        let core_id = 0u64;
+        unsafe { asm!(
+            "mov rdx, {}",
+            "mov rax, rdx",
+            "shr rdx, 32",
+            "mov ecx, 0xc0000103",
+            "wrmsr",
+            in(reg) core_id
+        ) };
+        self.cpus.push(Processor::new(0));
+        add_cpu();
+
+        let th1 = Thread::new(1, 0x20, 0x10, thread1 as u64);
+        let th2 = Thread::new(2, 0x20, 0x10, thread2 as u64);
+        add_thread(0, th1);
+        add_thread(0, th2);
+
+        if let Err(x) = self.map_drivers() {
             panic!("ACPI Error: {:?}", x);
         }
 
-        panic!("End of kernel execution");
+        // Enable interrupts after initializing built-in drivers
+        crate::cpu::start_ints();
+
+        // Have exceptions.rs set a "fired" flag in the timer int
+        // Then have a check after the "hlt" here which will look for
+        // the timer flag to be set, and if it is set, send an EOI
+        // to the appropriate driver on the driver bus
+        loop {
+            // Handle any outstanding INTs
+            while timer_queued() {
+                // Send the timerint signal to the bus
+                self.set("timerint", Arc::new(true)).unwrap();
+            }
+            info!("KERNEL HALTED");
+            unsafe { asm!("hlt") };
+        }
+    }
+}
+
+extern "C" fn thread1() {
+    info!("Thread 1");
+    loop {
+        /*while timer_queued() {
+            unsafe { KERNEL[0].set("timerint", Arc::new(true)).unwrap() };
+        }*/
+        info!("Thread 1 Halting");
+        unsafe { asm!("hlt") };
+        info!("Thread 1 Awoke");
+    }
+}
+
+extern "C" fn thread2() {
+    info!("Thread 2");
+    loop {
+        /*while timer_queued() {
+            unsafe { KERNEL[0].set("timerint", Arc::new(true)).unwrap() };
+        }*/
+        info!("Thread 2 Halting");
+        unsafe { asm!("hlt") };
+        info!("Thread 2 Awoke");
+    }
+}
+
+impl DriverBus for Kernel {
+    fn set(&self, s: &str, val: Arc<dyn Any + Sync +Send>) -> core::result::Result<(), crate::driver::Error> {
+        // First find the appropriate provider of s
+        for d in DRIVERS.iter() {
+            if let Some(_) = d.provides.iter().position(|&x| x == s) {
+                trace!("Found [{}] at driver [{}]", s, d.name);
+                return self.drivers.get(d.name)
+                    .and_then(|x| x.set(s, val).ok())
+                    .ok_or(crate::driver::Error::AssetFatalError { name: String::from(s) });
+            };
+        };
+
+        // If a scan of the list doesn't find the attribute we're searching for,
+        // then report that it doesn't exist
+        Err(crate::driver::Error::AssetNotProvided { name: String::from(s) })
+    }
+
+    fn get(&self, s: &str) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
+        // First find the appropriate provider of s
+        for d in DRIVERS.iter() {
+            if let Some(_) = d.provides.iter().position(|&x| x == s) {
+                trace!("Found [{}] at driver [{}]", s, d.name);
+                return self.drivers.get(d.name)
+                    .and_then(|x| x.get(s).ok())
+                    .ok_or(crate::driver::Error::AssetFatalError { name: String::from(s) });
+            };
+        };
+
+        // If a scan of the list doesn't find the attribute we're searching for,
+        // then report that it doesn't exist
+        Err(crate::driver::Error::AssetNotProvided { name: String::from(s) })
     }
 }

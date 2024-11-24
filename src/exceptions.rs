@@ -1,7 +1,14 @@
+use alloc::collections::BTreeSet;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::arch::asm;
+use core::arch::{asm, naked_asm};
+use crate::KERNEL;
+use crate::driver::DriverBus;
+use crate::cpu::{save_context, preempt_thread};
 use crate::interrupts::{InterruptDescriptorEntry, InterruptStack};
-use log::error;
+use log::{error, info};
+
+static mut INT_QUEUE: BTreeSet<&str> = BTreeSet::new();
 
 extern "x86-interrupt"
 fn div0_trap(frame: InterruptStack) {
@@ -68,6 +75,75 @@ fn segpres_panic(frame: InterruptStack, error_code: u64) {
 extern "x86-interrupt"
 fn stkseg_panic(frame: InterruptStack, error_code: u64) {
     panic!("Stack Segment Fault, error: {:#018x} @ {:?}", error_code, frame)
+}
+
+#[naked]
+extern "x86-interrupt"
+fn timer_int(frame: InterruptStack) {
+    unsafe {
+        naked_asm!(
+         "cli",
+         "push r15; push r14; push r13; push r12; push r11; push r10; push r9; push r8",
+         "push rdi; push rsi; push rbp; push rbx; push rdx; push rcx; push rax",
+         "mov rax, [rsp+0x98]",
+         "push rax",
+         "mov rax, [rsp+0x98]",
+         "push rax",
+         "mov rax, [rsp+0x98]",
+         "push rax",
+         "mov rax, [rsp+0x98]",
+         "push rax",
+         "mov rax, [rsp+0x98]",
+         "push rax",
+         "mov rax, [rsp+0x30]",
+         "call timer_int_inner",
+         "mov rcx, [rax+0x30]",
+         "mov rdx, [rax+0x38]",
+         "mov rbx, [rax+0x40]",
+         "mov rbp, [rax+0x48]",
+         "mov rsi, [rax+0x50]",
+         "mov rdi, [rax+0x58]",
+         "mov r8, [rax+0x60]",
+         "mov r9, [rax+0x68]",
+         "mov r10, [rax+0x70]",
+         "mov r11, [rax+0x78]",
+         "mov r12, [rax+0x80]",
+         "mov r13, [rax+0x88]",
+         "mov r14, [rax+0x90]",
+         "mov r15, [rax+0x98]",
+         "push qword ptr [rax+0x20]",
+         "push qword ptr [rax+0x18]",
+         "push qword ptr [rax+0x10]",
+         "push qword ptr [rax+0x08]",
+         "push qword ptr [rax]",
+         "mov rax, [rax+0x28]",
+         "iretq",
+        );
+    };
+}
+
+#[no_mangle]
+//extern "x86-interrupt"
+extern "C"
+fn timer_int_inner(context: crate::thread::ThreadContext) -> crate::thread::ThreadContext {
+    let mut rsp1 = 0u64;
+    unsafe { asm!(
+        "mov {}, rsp",
+        out(reg) rsp1,
+    ) };
+    crate::cpu::stop_ints();
+    //info!("Timer (stk: {:#018x}) @ {:?}, Core: {}", rsp1, context, crate::cpu::get_core_id());
+    unsafe { INT_QUEUE.insert("timer") };
+    save_context(crate::cpu::get_core_id(), context);
+    let h = preempt_thread(crate::cpu::get_core_id());
+    //info!("New context @ {:?}", h);
+    unsafe { KERNEL[0].set("timerint", Arc::new(true)).unwrap() };
+    h
+    //error!("Timer @ {:?}", frame2);
+    // TODO: The thread context needs to be saved here. This means that the associated thread
+    //       (which is now interrupted/paused) needs to be discovered and the context that we
+    //       have saved needs to be stored in it. At this point, it will still be the "active"
+    //       thread on the CPU, so perhaps 
 }
 
 extern "x86-interrupt"
@@ -207,4 +283,12 @@ pub fn attach_exceptions(idt: &mut Vec<InterruptDescriptorEntry>) {
 
     // Attach Security Exception handler
     idt[30] = InterruptDescriptorEntry::new_trap_error_code(sec_panic, 0x10, 0, 2);
+
+    // Attach NMI handler
+    idt[32] = InterruptDescriptorEntry::new_int(timer_int, 0x10, 0, 3);
+}
+
+/// If the timer int was queued, then return true and clear it from the queue
+pub fn timer_queued() -> bool {
+    unsafe { INT_QUEUE.remove("timer") }
 }

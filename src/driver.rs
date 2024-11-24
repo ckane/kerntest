@@ -20,15 +20,23 @@ pub enum Error {
     AssetFatalError { name: String },
 }
 
+pub type DriverError = Error;
+
+pub(crate) trait DriverBus {
+    fn get(&self, s: &str) -> Result<Arc<dyn Any + Sync + Send>, Error>;
+    fn set(&self, s: &str, val: Arc<dyn Any + Sync +Send>) -> core::result::Result<(), crate::driver::Error>;
+}
+
 pub(crate) trait Driver {
-    fn new() -> Result<alloc::sync::Arc<dyn Driver>, Error> where Self: Sized;
-    fn get(&self, s: &str) -> Result<Arc<dyn Any>, Error>;
+    fn new(bus: &mut dyn DriverBus) -> Result<alloc::sync::Arc<dyn Driver>, Error> where Self: Sized;
+    fn get(&self, s: &str) -> Result<Arc<dyn Any + Send + Sync>, Error>;
+    fn set(&self, s: &str, val: Arc<dyn Any + Send + Sync>) -> Result<(), Error>;
 }
 
 #[derive(Clone, Debug)]
 pub struct DriverEntry {
     pub name: &'static str,
-    pub ctor: fn() -> Result<alloc::sync::Arc<dyn Driver>, Error>,
+    pub ctor: fn(&mut dyn DriverBus) -> Result<alloc::sync::Arc<dyn Driver>, Error>,
     pub req: &'static [&'static str],
     pub provides: &'static [&'static str],
 }

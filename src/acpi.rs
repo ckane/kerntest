@@ -1,19 +1,108 @@
-use acpi::{AcpiError, AcpiTables, handler::{AcpiHandler, PhysicalMapping}, hpet::HpetInfo, mcfg::{PciConfigEntry, PciConfigRegions}, platform::PlatformInfo};
+use acpi::{
+    AcpiError, AcpiTables,
+    handler::{AcpiHandler, PhysicalMapping},
+    hpet::HpetInfo,
+    madt::IoApicEntry,
+    mcfg::{PciConfigEntry, PciConfigRegions},
+    platform::{
+        interrupt::{
+            IoApic,
+            InterruptModel,
+            InterruptSourceOverride,
+            LocalInterruptLine,
+            NmiLine,
+            NmiProcessor,
+            NmiSource,
+        },
+        PlatformInfo,
+    },
+};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
 use crate::GKARG;
 use linkme::distributed_slice;
-use log::{error, info, trace};
+use log::{info, trace};
 use snafu::prelude::*;
-use crate::driver::{DRIVERS, Driver, DriverEntry};
-use crate::memdrv::{MEM_DRIVER, MemDriver};
+use crate::driver::{DRIVERS, Driver, DriverBus, DriverEntry, DriverError};
+use crate::memdrv::PatTypes;
+use crate::physmap::PhysMapper;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+enum LApicLine {
+    LINT0,
+    LINT1,
+}
+
+impl From<LocalInterruptLine> for LApicLine {
+    fn from(nmi_line: LocalInterruptLine) -> Self {
+        match nmi_line {
+            LocalInterruptLine::Lint0 => Self::LINT0,
+            LocalInterruptLine::Lint1 => Self::LINT1,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+enum NmiProc {
+    All,
+    Uid(u32),
+}
+
+impl From<NmiProcessor> for NmiProc {
+    fn from(nmi_processor: NmiProcessor) -> Self {
+        match nmi_processor {
+            NmiProcessor::All => NmiProc::All,
+            NmiProcessor::ProcessorUid(i) => NmiProc::Uid(i)
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct NmiInfo {
+    cpu: NmiProc,
+    line: LApicLine,
+}
+
+impl From<&NmiLine> for NmiInfo {
+    fn from(nmi: &NmiLine) -> Self {
+        Self {
+            cpu: nmi.processor.into(),
+            line: nmi.line.into(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct LocalApicData {
+    lapic_phys: usize,
+    nmi_lines: Vec<NmiInfo>,
+}
+
+impl LocalApicData {
+    pub fn get_phys_addr(&self) -> usize {
+        self.lapic_phys
+    }
+
+    pub fn get_nmi_lines(&self) -> &Vec<NmiInfo> {
+        &self.nmi_lines
+    }
+}
 
 pub struct AcpiDriver {
     handler: VirtAcpiHandler,
     acpi: AcpiTables<VirtAcpiHandler>,
-    hpet: HpetInfo,
+    hpet: Arc<HpetInfo>,
+    lapic_phys: usize,
+    ioapics: Vec<IoApic>,
+    lapic_nmi_lines: Vec<NmiLine>,
+    int_source_overrides: Vec<InterruptSourceOverride>,
+    nmi_sources: Vec<NmiSource>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -58,20 +147,6 @@ enum Error {
 
 type Result<T> = core::result::Result<T, Error>;
 
-struct IntData {
-    avail: Vec<usize>,
-}
-
-impl IntData {
-    /// Create a new VirtAcpiHandler with an available allocation list of
-    /// {size} 256MB mappings
-    fn initialize(&mut self, size: usize) {
-        for i in 0..size {
-            self.avail.push(i)
-        }
-    }
-}
-
 impl From<AcpiError> for Error {
     fn from(acpierr: AcpiError) -> Self {
         Self::Acpi { acpi_detail: acpierr }
@@ -98,16 +173,26 @@ impl From<PciConfigEntry> for EcamSegment {
 }
 
 impl Driver for AcpiDriver {
-    fn new() -> core::result::Result<Arc<dyn Driver>, crate::driver::Error> {
+    fn new(_bus: &mut dyn DriverBus) -> core::result::Result<Arc<dyn Driver>, crate::driver::Error> {
         Ok(Arc::new(Self::init()?))
     }
 
-    fn get(&self, s: &str) -> core::result::Result<Arc<dyn Any>, crate::driver::Error> {
+    fn set(&self, s: &str, val: Arc<dyn Any + Send + Sync>) -> core::result::Result<(), crate::driver::Error> {
+        Err(DriverError::AssetNotProvided { name: s.into() })
+    }
+
+    fn get(&self, s: &str) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
         match s {
             "pcie_ecam" => {
-                let mut pe = self.get_pcie_regions()?;
+                let pe = self.get_pcie_regions()?;
                 info!("Ecams in match: {:?}", pe);
                 Ok(Arc::new(AcpiDriverData::EcamPointer(pe)))
+            },
+            "hpet_info" => {
+                Ok(self.hpet.clone())
+            },
+            "lapic" => {
+                Ok(Arc::new(self.get_local_apic()?))
             },
             _ => Err(crate::driver::Error::AssetNotProvided { name: String::from(s) }),
         }
@@ -123,7 +208,44 @@ impl AcpiDriver {
         info!("ACPI Structure loaded! {:?}", acpi);
         let hpet_info = HpetInfo::new(&acpi)?;
         info!("HPET Info: {:?}", hpet_info);
-        Ok(Self { handler, acpi, hpet: hpet_info })
+        let acpi_platform_info = PlatformInfo::new(&acpi)?;
+        info!("Platform Info: {:?}", acpi_platform_info);
+
+        let mut ioapics = Vec::new();
+        let mut int_source_overrides = Vec::new();
+        let mut lapic_nmi_lines = Vec::new();
+        let mut nmi_sources = Vec::new();
+        let mut lapic_phys = 0usize;
+        if let InterruptModel::Apic(apic) = acpi_platform_info.interrupt_model {
+            lapic_phys = apic.local_apic_address as usize;
+            for ioapic in apic.io_apics.iter() {
+                ioapics.push(IoApic { ..*ioapic });
+            }
+            for iso in apic.interrupt_source_overrides.iter() {
+                int_source_overrides.push(InterruptSourceOverride { ..*iso });
+            }
+            for nmi_line in apic.local_apic_nmi_lines.iter() {
+                lapic_nmi_lines.push(NmiLine { ..*nmi_line });
+            }
+            for nmi_src in apic.nmi_sources.iter() {
+                nmi_sources.push(NmiSource { ..*nmi_src });
+            }
+        }
+        info!("LAPIC paddr: {:#018x}", lapic_phys);
+        for ioapic in ioapics.iter() {
+            info!("IOAPIC #{} paddr: {:#018x}, start: {}", ioapic.id, ioapic.address as usize, ioapic.global_system_interrupt_base);
+        }
+
+        Ok(Self {
+            handler,
+            acpi,
+            hpet: Arc::new(hpet_info),
+            ioapics,
+            int_source_overrides,
+            lapic_nmi_lines,
+            lapic_phys,
+            nmi_sources,
+        })
     }
 
     fn get_pcie_regions(&self) -> Result<Vec<EcamSegment>> {
@@ -132,10 +254,17 @@ impl AcpiDriver {
         for pcir in pci_regions.iter() {
             info!("Pci Region: {:#018x} SG:{:#06x} Rng: {:#04x}-{:#04x}", pcir.physical_address, pcir.segment_group,
                 pcir.bus_range.start(), pcir.bus_range.end());
-            pcie_ecam.push(EcamSegment::from(pcir));
+            pcie_ecam.push(EcamSegment::from(pcir).clone());
         };
-        info!("Ecams: {:?}", pcie_ecam);
+        info!("Ecams: {:?} {:#018x}", pcie_ecam, pcie_ecam.as_ptr() as usize);
         Ok(pcie_ecam)
+    }
+
+    fn get_local_apic(&self) -> Result<LocalApicData> {
+        Ok(LocalApicData {
+            lapic_phys: self.lapic_phys,
+            nmi_lines: self.lapic_nmi_lines.iter().map(|x| x.into()).collect(),
+        })
     }
 }
 
@@ -143,76 +272,23 @@ impl AcpiDriver {
 pub static ACPI_DRIVER_RECORD: DriverEntry = DriverEntry {
     name: "acpi",
     req: &[],
-    provides: &["pcie_ecam", "hpet_info", "acpi"],
+    provides: &["pcie_ecam", "hpet_info", "acpi", "lapic"],
     ctor: AcpiDriver::new
 };
 
 
-static mut INT_DATA: IntData = IntData {
-    avail: vec![],
-};
-
-/// Each mapped segment is 256MB
-const SEG_SHIFT: usize = 12;
-const MAP_SIZE: usize = 1usize << SEG_SHIFT;
-const MAP_BASE: usize = 0xffffc00000000000;
-const MAP_COUNTS: usize = 1024;
-
 impl AcpiHandler for VirtAcpiHandler {
     unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> PhysicalMapping<Self, T> {
-        // If INT_DATA uninitialized, then initialize it
-        if INT_DATA.avail.is_empty() {
-            INT_DATA.initialize(MAP_COUNTS)
-        }
-
-        trace!("Req: {:#018x} len {:#018x} T: {}", physical_address, size, core::mem::size_of::<T>());
-
-        // Calculate the physical base addr on its nearest page boundary
-        let pbase = physical_address & !0xfffusize;
-
-        // Determine what the size needs to be, adjusted as 4kB pages
-        let adj_size = (size + (MAP_SIZE - 1)) & !(MAP_SIZE - 1);
-
-        // First find out how many segments will be needed
-        let num_seg = (adj_size + (MAP_SIZE - 1)) / MAP_SIZE;
-
-        // Then, determine where in self.avail we have a sequence that's that long
-        let mut sequence = false;
-        let mut seq_idx = 0;
-        for (j, w) in INT_DATA.avail.windows(num_seg).enumerate() {
-            sequence = true;
-            for (i, val) in w.iter().enumerate() {
-                if *val != w[0] + i {
-                    sequence = false;
-                    break;
-                } 
-            }
-            if sequence {
-                seq_idx = j;
-                break;
-            }
-        };
-
-        // If we validated the set was a sequence, then perform a mapping across it
-        if sequence {
-            let vseg_start = INT_DATA.avail[seq_idx];
-            for _ in 0..num_seg {
-                let vseg = INT_DATA.avail.remove(seq_idx);
-                for p in 0..(MAP_SIZE >> 12) {
-                    MEM_DRIVER.map_vtop(MAP_BASE + (vseg << SEG_SHIFT) + (p << 12usize), pbase + (p << 12usize));
-                }
-            }
-
-            let struct_addr = MAP_BASE + (vseg_start << SEG_SHIFT) + (physical_address & 0xfffusize);
+        if let Ok(vmap) = PhysMapper::map_phys(physical_address, size, PatTypes::Uncacheable) {
             let pm = PhysicalMapping::new(physical_address,
-                                          core::ptr::NonNull::<T>::new_unchecked(struct_addr as *mut T),
-                                          size,
-                                          adj_size,
-                                          self.clone());
-            trace!("Mapped {:#018x} len {:#018x} to {:#018x}", pm.physical_start(), pm.mapped_length(), struct_addr);
+                core::ptr::NonNull::<T>::new_unchecked(vmap.get_vptr()),
+                size,
+                vmap.get_size(),
+                self.clone());
+            trace!("Mapped {:#018x} len {:#018x} to {:#018x}", pm.physical_start(), pm.mapped_length(), vmap.get_vptr() as usize);
             return pm;
-
         }
+
         panic!("Couldn't find frames to map for ACPI!")
     }
 
@@ -220,30 +296,7 @@ impl AcpiHandler for VirtAcpiHandler {
         trace!("Unmap for {:#018x} len {:#018x} at {:#018x}", region.physical_start(), region.mapped_length(),
               region.virtual_start().as_ptr() as usize);
 
-        let vstart = ((region.virtual_start().as_ptr() as usize) - 0xffffc00000000000usize) >> SEG_SHIFT;
+        PhysMapper::unmap(region.virtual_start().as_ptr(), region.mapped_length());
 
-        // Scan the available segments list for the sorted position where the requested freed
-        // segment belongs
-        for i in 0..unsafe { INT_DATA.avail.len() } {
-            let ival = unsafe { INT_DATA.avail[i] };
-            if ival > vstart {
-                trace!("Pos: {}/{:#018x} > {:#018x}", i, ival, vstart);
-                let end_segs = vstart + (region.mapped_length() + (MAP_SIZE - 1)) / MAP_SIZE;
-
-                for s in vstart..end_segs {
-                    // Unmap all the backing pages
-                    for p in 0..(MAP_SIZE >> 12) {
-                        trace!("Unmapping: {:#018x}", MAP_BASE + ((vstart + end_segs - s - 1usize) << SEG_SHIFT) + (p << 12usize));
-                        unsafe { MemDriver::unmap_vmap(MAP_BASE + ((vstart + end_segs - s - 1usize) << SEG_SHIFT) + (p << 12usize)) };
-                    }
-
-                    // Insert the freed segment back on the segment list in the appropriate sorted
-                    // position
-                    unsafe { INT_DATA.avail.insert(i, vstart + end_segs - s - 1) };
-                    unsafe { trace!("New avail head: {:#018x}", INT_DATA.avail.first().unwrap()) };
-                }
-                break;
-            }
-        }
     }
 }

@@ -102,7 +102,10 @@ impl DrawTarget for UnsafeFrameBuffer {
 impl Write for SimpleFb {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         if self.configured {
-            unsafe { BOOT_FRAME_BUFFER.write_str(s) }
+            crate::cpu::stop_ints();
+            let out = unsafe { BOOT_FRAME_BUFFER.write_str(s) };
+            crate::cpu::start_ints();
+            out
         } else {
             Ok(())
         }
@@ -157,8 +160,12 @@ impl UnsafeFrameBuffer {
         self.fbptr
     }
 
-    pub fn size(&self) -> usize {
+    pub fn fbsize(&self) -> usize {
         self.fbsize
+    }
+
+    pub fn get_stride(&self) -> usize {
+        self.stride
     }
 
     pub fn new(
@@ -185,6 +192,10 @@ impl UnsafeFrameBuffer {
             txtcur_x: 0,
             txtcur_y: 0,
         }
+    }
+
+    pub fn get_txtcur(&self) -> (usize, usize) {
+        unsafe { (BOOT_FRAME_BUFFER.txtcur_x, BOOT_FRAME_BUFFER.txtcur_y) }
     }
 
     fn scroll_one(&mut self) {
