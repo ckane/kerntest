@@ -71,6 +71,11 @@ impl Thread {
 
     pub fn save_context(&mut self, context: ThreadContext) {
         self.saved_context = context;
+
+        // When saving context, always enable IF so interrupts get reset on iretq from context
+        // switch
+        self.saved_context.flags |= 0x200;
+        self.saved_context.frame.rfl |= 0x200;
     }
 
     pub fn get_context(&self) -> ThreadContext {
