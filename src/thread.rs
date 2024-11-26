@@ -29,16 +29,43 @@ pub struct ThreadContext {
 
 impl core::fmt::Debug for ThreadContext {
     /// Write out the contents of an InterruptStack
-    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
-        write!(fmt, "{{ rax: {:#018x}, rcx: {:#018x}, rdx: {:#018x}, rbx: {:#018x}, rbp: {:#018x}, ",
-            self.rax, self.rcx, self.rdx, self.rbx, self.rbp)?;
-        write!(fmt, "rsi: {:#018x}, rdi: {:#018x}, r8: {:#018x}, r9: {:#018x}, r10: {:#018x}, ",
-            self.rsi, self.rdi, self.r08, self.r09, self.r10)?;
-        write!(fmt, "r11: {:#018x}, r12: {:#018x}, r13: {:#018x}, r14: {:#018x}, r15: {:#018x}, ",
-            self.r11, self.r12, self.r13, self.r14, self.r15)?;
-        write!(fmt, "rip: {:#018x}, cs: {:#018x}, flags: {:#018x}, rsp: {:#018x}, ss: {:#018x} }}",
-            self.rip, self.cs, self.flags, self.rsp, self.ss)?;
+    fn fmt(
+        &self,
+        fmt: &mut core::fmt::Formatter<'_>,
+    ) -> core::result::Result<(), core::fmt::Error> {
+        write!(
+            fmt,
+            "{{ rax: {:#018x}, rcx: {:#018x}, rdx: {:#018x}, rbx: {:#018x}, rbp: {:#018x}, ",
+            self.rax, self.rcx, self.rdx, self.rbx, self.rbp
+        )?;
+        write!(
+            fmt,
+            "rsi: {:#018x}, rdi: {:#018x}, r8: {:#018x}, r9: {:#018x}, r10: {:#018x}, ",
+            self.rsi, self.rdi, self.r08, self.r09, self.r10
+        )?;
+        write!(
+            fmt,
+            "r11: {:#018x}, r12: {:#018x}, r13: {:#018x}, r14: {:#018x}, r15: {:#018x}, ",
+            self.r11, self.r12, self.r13, self.r14, self.r15
+        )?;
+        write!(
+            fmt,
+            "rip: {:#018x}, cs: {:#018x}, flags: {:#018x}, rsp: {:#018x}, ss: {:#018x} }}",
+            self.rip, self.cs, self.flags, self.rsp, self.ss
+        )?;
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ThreadState {
+    Running,
+    Queued,
+}
+
+impl Default for ThreadState {
+    fn default() -> Self {
+        Self::Queued
     }
 }
 
@@ -46,6 +73,7 @@ impl core::fmt::Debug for ThreadContext {
 pub(crate) struct Thread {
     saved_context: ThreadContext,
     id: usize,
+    state: ThreadState,
     stack: alloc::boxed::Box<Vec<usize>>,
 }
 
@@ -54,6 +82,7 @@ impl Thread {
         let mut s = Self {
             id,
             stack: alloc::boxed::Box::new(vec![0; 65536]),
+            state: ThreadState::Queued,
             saved_context: ThreadContext::default(),
         };
         s.saved_context.rdi = id as u64;
@@ -81,5 +110,17 @@ impl Thread {
 
     pub fn get_context(&self) -> ThreadContext {
         self.saved_context
+    }
+
+    pub fn get_state(&self) -> ThreadState {
+        self.state
+    }
+
+    pub fn set_running(&mut self) {
+        self.state = ThreadState::Running;
+    }
+
+    pub fn set_queued(&mut self) {
+        self.state = ThreadState::Queued;
     }
 }
