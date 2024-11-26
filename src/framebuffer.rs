@@ -102,9 +102,7 @@ impl DrawTarget for UnsafeFrameBuffer {
 impl Write for SimpleFb {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         if self.configured {
-            crate::cpu::stop_ints();
             let out = unsafe { BOOT_FRAME_BUFFER.write_str(s) };
-            crate::cpu::start_ints();
             out
         } else {
             Ok(())
