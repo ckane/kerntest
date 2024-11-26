@@ -56,6 +56,7 @@ impl Thread {
             stack: alloc::boxed::Box::new(vec![0; 65536]),
             saved_context: ThreadContext::default(),
         };
+        s.saved_context.rdi = id as u64;
         s.saved_context.ss = ss;
         s.saved_context.frame.ss = ss;
         s.saved_context.cs = cs;
