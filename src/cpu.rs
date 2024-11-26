@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
 use core::arch::asm;
@@ -7,8 +8,8 @@ use crate::thread::Thread;
 #[derive(Clone, Debug)]
 pub(crate) struct Processor {
     id: u64,
-    runq: VecDeque<Thread>,
-    active: Option<Thread>,
+    runq: VecDeque<Box<Thread>>,
+    active: Option<Box<Thread>>,
     crit_stack: usize,
 }
 
@@ -33,7 +34,7 @@ pub fn add_cpu() {
     }
 }
 
-pub fn add_thread(id: u64, th: Thread) {
+pub fn add_thread(id: u64, th: Box<Thread>) {
     unsafe {
         CPUS[id as usize].runq.push_back(th);
     }
@@ -55,16 +56,16 @@ pub fn preempt_thread(cpu: u64) -> crate::thread::ThreadContext {
     unsafe {
         if let Some(cpu_ref) = CPUS.get_mut(cpu as usize) {
             // Move the running task to the back of the runq
-            if let Some(th) = cpu_ref.active.as_mut() {
-                cpu_ref.runq.push_back(th.clone());
+            if let Some(th) = cpu_ref.active.take() {
+                cpu_ref.runq.push_back(th);
             }
 
             // Pop the next item off the runq and run it
             let next_thread = cpu_ref.runq.pop_front().unwrap();
-            //let ctx = next_thread.get_context().clone();
-            cpu_ref.active = Some(next_thread.clone());
+            let context = next_thread.get_context();
+            cpu_ref.active = Some(next_thread);
             cpu_ref.crit_stack = 0;
-            next_thread.get_context()
+            context
         } else {
             crate::thread::ThreadContext::default()
         }
