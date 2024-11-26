@@ -20,6 +20,7 @@ impl Log for KernLogger {
         if !self.enabled(rec.metadata()) {
             return;
         }
+        let _lock = crate::cpu::CritSection::new();
         if let Some(lo) = unsafe { LOG_OUTPUT } {
             if let Some(mm) = unsafe { lo.as_mut() } {
                 write!(mm, "[{}]", rec.level()).unwrap();
