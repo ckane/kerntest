@@ -306,10 +306,9 @@ impl Kernel {
         self.cpus.push(Processor::new(0));
         add_cpu();
 
-        let th1 = Thread::new(1, 0x20, 0x10, thread1 as u64);
-        let th2 = Thread::new(2, 0x20, 0x10, thread2 as u64);
-        add_thread(0, th1);
-        add_thread(0, th2);
+        for th in 0..10 {
+            add_thread(0, Box::new(Thread::new(th + 1, 0x20, 0x10, thread1 as u64)));
+        }
 
         if let Err(x) = self.map_drivers() {
             panic!("ACPI Error: {:?}", x);
@@ -334,15 +333,23 @@ impl Kernel {
     }
 }
 
-extern "C" fn thread1() {
-    info!("Thread 1");
+extern "C" fn thread1(th: u64) {
+    let thnum = th;
+    info!("Thread {}", thnum);
     loop {
         /*while timer_queued() {
             unsafe { KERNEL[0].set("timerint", Arc::new(true)).unwrap() };
         }*/
-        info!("Thread 1 Halting");
+        let mut rsp_copy = 0u64;
+        unsafe {
+            asm!(
+                "mov {},rsp",
+                out(reg) rsp_copy
+            )
+        }
+        info!("Thread {} Halting (rsp: {:#018x})", thnum, rsp_copy);
         unsafe { asm!("hlt") };
-        info!("Thread 1 Awoke");
+        info!("Thread {} Awoke (rsp: {:018x})", thnum, rsp_copy);
     }
 }
 
