@@ -353,18 +353,6 @@ extern "C" fn thread1(th: u64) {
     }
 }
 
-extern "C" fn thread2() {
-    info!("Thread 2");
-    loop {
-        /*while timer_queued() {
-            unsafe { KERNEL[0].set("timerint", Arc::new(true)).unwrap() };
-        }*/
-        info!("Thread 2 Halting");
-        unsafe { asm!("hlt") };
-        info!("Thread 2 Awoke");
-    }
-}
-
 impl DriverBus for Kernel {
     fn set(&self, s: &str, val: Arc<dyn Any + Sync +Send>) -> core::result::Result<(), crate::driver::Error> {
         // First find the appropriate provider of s
