@@ -102,7 +102,7 @@ impl LocalApicDriver {
             info!("Countdown at: {:#010x}", new_count);
 
             // Set the Timer LVT
-            s.set_reg_addr(0x380, 0x1000000);
+            s.set_reg_addr(0x380, 0x200000);
             s.set_reg_addr(0x320, 0x20020);
             s.set_reg_addr(0x3e0, 3);
 
