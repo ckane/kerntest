@@ -1,4 +1,5 @@
 use core::alloc::{GlobalAlloc, Layout, LayoutError};
+use crate::cpu::CritSection;
 use log::{error, info, trace};
 use snafu::prelude::*;
 
@@ -658,12 +659,14 @@ impl InnerKernelAlloc {
 
 unsafe impl GlobalAlloc for KernelAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let _lock = CritSection::new();
         INNER_KERN_ALLOC
             .alloc(layout)
             .unwrap_or(core::ptr::null::<u8>() as *mut u8)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        INNER_KERN_ALLOC.dealloc(ptr)
+        let _lock = CritSection::new();
+        INNER_KERN_ALLOC.dealloc(ptr);
     }
 }
 

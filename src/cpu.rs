@@ -3,6 +3,7 @@ use alloc::boxed::Box;
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
 use core::arch::asm;
+use core::ops::Drop;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Debug)]
@@ -85,6 +86,21 @@ pub(crate) fn get_core_id() -> u64 {
         );
     };
     core_id
+}
+
+pub(crate) struct CritSection;
+
+impl CritSection {
+    pub fn new() -> Self {
+        stop_ints();
+        Self
+    }
+}
+
+impl Drop for CritSection {
+    fn drop(&mut self) {
+        start_ints();
+    }
 }
 
 pub(crate) fn start_ints() {
