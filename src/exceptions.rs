@@ -126,11 +126,11 @@ fn timer_int(frame: InterruptStack) {
 //extern "x86-interrupt"
 extern "C"
 fn timer_int_inner(context: crate::thread::ThreadContext) -> crate::thread::ThreadContext {
-    let mut rsp1 = 0u64;
+    /*let mut rsp1 = 0u64;
     unsafe { asm!(
         "mov {}, rsp",
         out(reg) rsp1,
-    ) };
+    ) };*/
     crate::cpu::stop_ints();
     //info!("Timer (stk: {:#018x}) @ {:?}, Core: {}", rsp1, context, crate::cpu::get_core_id());
     unsafe { INT_QUEUE.insert("timer") };
