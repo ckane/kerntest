@@ -14,7 +14,7 @@ pub enum Error {
     MapCollision { vpage: usize, ppage: usize },
 
     /// Insufficient free memory
-    Allocator { source: crate::allocator::Error }
+    Allocator { source: crate::allocator::Error },
 }
 
 impl From<crate::allocator::Error> for Error {
@@ -249,48 +249,54 @@ impl MemDriver {
     fn update_pat() {
         let mut patreg: u64;
         // Get the PAT MTRR
-        unsafe { asm!(
-            "mov rcx, 0x277",
-            "rdmsr",
-            // MSR returns in EDX:EAX, so shift RDX left 32 bits
-            // and merge into RAX
-            "shl rdx,32",
-            "or rax,rdx",
-            "mov {},rax",
-            out(reg) patreg,
-        )};
+        unsafe {
+            asm!(
+                "mov rcx, 0x277",
+                "rdmsr",
+                // MSR returns in EDX:EAX, so shift RDX left 32 bits
+                // and merge into RAX
+                "shl rdx,32",
+                "or rax,rdx",
+                "mov {},rax",
+                out(reg) patreg,
+            )
+        };
         trace!("PAT MTRR: {:#018x}", patreg);
 
         // Modify the PAT to make WC be PAT=1,PCD=1,PWT=1
         patreg = (patreg & 0x00ffffffffffffff) | 0x0100000000000000;
 
         // Set the PAT MTRR
-        unsafe { asm!(
-            "mov rcx, 0x0ffffffff",
-            "mov rax, {}",
-            "mov rdx, rax",
-            "and rax, rcx",
-            "shr rdx, 32",
-            "and rdx, rcx",
-            "mov rcx, 0x277",
-            "wrmsr",
-            in(reg) patreg,
-        )};
+        unsafe {
+            asm!(
+                "mov rcx, 0x0ffffffff",
+                "mov rax, {}",
+                "mov rdx, rax",
+                "and rax, rcx",
+                "shr rdx, 32",
+                "and rdx, rcx",
+                "mov rcx, 0x277",
+                "wrmsr",
+                in(reg) patreg,
+            )
+        };
 
         info!("PAT MTRR Updated");
 
         let patcheck: u64;
         // Get the PAT MTRR
-        unsafe { asm!(
-            "mov rcx, 0x277",
-            "rdmsr",
-            // MSR returns in EDX:EAX, so shift RDX left 32 bits
-            // and merge into RAX
-            "shl rdx,32",
-            "or rax,rdx",
-            "mov {},rax",
-            out(reg) patcheck,
-        )};
+        unsafe {
+            asm!(
+                "mov rcx, 0x277",
+                "rdmsr",
+                // MSR returns in EDX:EAX, so shift RDX left 32 bits
+                // and merge into RAX
+                "shl rdx,32",
+                "or rax,rdx",
+                "mov {},rax",
+                out(reg) patcheck,
+            )
+        };
         trace!("PAT MTRR: {:#018x}", patcheck);
 
         if patcheck != patreg {
@@ -338,7 +344,11 @@ impl MemDriver {
                     self.dynstart.0,
                     self.free_pages[self.ifp].0
                 );
-                Self::map_pdpt_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
+                Self::map_pdpt_exact(
+                    self.dynstart.into(),
+                    self.free_pages[self.ifp].into(),
+                    PatTypes::Normal,
+                );
                 Self::pinvalidate(ipdpt);
                 self.ifp += 1;
             }
@@ -349,7 +359,11 @@ impl MemDriver {
                     self.dynstart.0,
                     self.free_pages[self.ifp].0
                 );
-                Self::map_pde_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
+                Self::map_pde_exact(
+                    self.dynstart.into(),
+                    self.free_pages[self.ifp].into(),
+                    PatTypes::Normal,
+                );
                 Self::pinvalidate(ipde);
                 self.ifp += 1;
             }
@@ -360,7 +374,11 @@ impl MemDriver {
                     self.dynstart.0,
                     self.free_pages[self.ifp].0
                 );
-                Self::map_pt_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
+                Self::map_pt_exact(
+                    self.dynstart.into(),
+                    self.free_pages[self.ifp].into(),
+                    PatTypes::Normal,
+                );
                 Self::pinvalidate(ipt);
                 self.ifp += 1;
             }
@@ -379,7 +397,11 @@ impl MemDriver {
              * physical page from the stack. Instead, free the following page and remap
              * its physical page instead.
              */
-            Self::map_page_exact(self.dynstart.into(), self.free_pages[self.ifp].into(), PatTypes::Normal);
+            Self::map_page_exact(
+                self.dynstart.into(),
+                self.free_pages[self.ifp].into(),
+                PatTypes::Normal,
+            );
             Self::pinvalidate(self.dynstart.into());
             self.ifp += 1;
             self.dynstart = MemPage(self.dynstart.0 + 0x1000);
@@ -473,7 +495,7 @@ impl MemDriver {
             if paddr > 0 {
                 *p = crate::paging::PDEntry::from_paddr(paddr);
                 match pat {
-                    PatTypes::Normal => {},
+                    PatTypes::Normal => {}
                     PatTypes::Uncacheable => (*p).set_cache_disabled(true),
                     PatTypes::WriteCombining => (*p).set_wc(),
                 };
@@ -564,11 +586,13 @@ impl MemDriver {
         if let Ok(oldpaddr) = Self::vtop(vaddr) {
             match oldpaddr == paddr {
                 // If the requested physpage already matches the current mapping, return success
-                true  => Ok(()),
-                false => Err(Error::MapCollision { vpage: vaddr, ppage: oldpaddr })?
+                true => Ok(()),
+                false => Err(Error::MapCollision {
+                    vpage: vaddr,
+                    ppage: oldpaddr,
+                })?,
             }
         } else {
-
             // To be on the safe side, we will throw an "insufficient free" error if
             // the available free pages is less than 4 - which would prevent us from
             // mapping the page plus all intermediate paging structures, if all are

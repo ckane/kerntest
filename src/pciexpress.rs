@@ -1,8 +1,8 @@
 use crate::acpi::{AcpiDriverData, EcamSegment};
-use crate::driver::{DRIVERS, Driver, DriverBus, DriverEntry, DriverError};
+use crate::driver::{Driver, DriverBus, DriverEntry, DriverError, DRIVERS};
 
-use alloc::sync::Arc;
 use alloc::string::String;
+use alloc::sync::Arc;
 use core::any::Any;
 use core::ops::Deref;
 use linkme::distributed_slice;
@@ -41,7 +41,9 @@ struct PciExpressDriver;
 
 impl PciExpressDriver {
     fn calc_offset(base: usize, bus: u8, dev: u8, func: u8) -> usize {
-        base + ((bus as usize) << 20) + (((dev & 0x1f) as usize) << 15) + (((func & 0x7) as usize) << 12)
+        base + ((bus as usize) << 20)
+            + (((dev & 0x1f) as usize) << 15)
+            + (((func & 0x7) as usize) << 12)
     }
     fn walk_segment_group(seg: EcamSegment) {
         let mut count = 0;
@@ -59,7 +61,7 @@ impl PciExpressDriver {
                             );
                             count += 1;
                             if count > 40 {
-                                return
+                                return;
                             }
                         }
                     }
@@ -70,23 +72,38 @@ impl PciExpressDriver {
 }
 
 impl Driver for PciExpressDriver {
-    fn new(bus: &mut dyn DriverBus) -> Result<alloc::sync::Arc<dyn Driver>, DriverError> where Self: Sized {
-        if let Ok(AcpiDriverData::EcamPointer(segs)) = bus.get("pcie_ecam")?.downcast::<AcpiDriverData>().map(|x| x.deref().clone()) {
+    fn new(bus: &mut dyn DriverBus) -> Result<alloc::sync::Arc<dyn Driver>, DriverError>
+    where
+        Self: Sized,
+    {
+        if let Ok(AcpiDriverData::EcamPointer(segs)) = bus
+            .get("pcie_ecam")?
+            .downcast::<AcpiDriverData>()
+            .map(|x| x.deref().clone())
+        {
             for seg in segs {
                 Self::walk_segment_group(seg);
             }
             Ok(Arc::new(Self))
         } else {
-            Err(DriverError::Initialization { reason: String::from("Invalid Data returned for ECAM") })
+            Err(DriverError::Initialization {
+                reason: String::from("Invalid Data returned for ECAM"),
+            })
         }
     }
 
-    fn set(&self, s: &str, val: Arc<dyn Any + Send + Sync>) -> core::result::Result<(), crate::driver::Error> {
+    fn set(
+        &self,
+        s: &str,
+        val: Arc<dyn Any + Send + Sync>,
+    ) -> core::result::Result<(), crate::driver::Error> {
         Err(DriverError::AssetNotProvided { name: s.into() })
     }
 
     fn get(&self, s: &str) -> Result<Arc<dyn Any + Sync + Send>, DriverError> {
-        Err(DriverError::AssetNotProvided { name: String::from(s) })
+        Err(DriverError::AssetNotProvided {
+            name: String::from(s),
+        })
     }
 }
 
@@ -95,5 +112,5 @@ pub static PCIEXPRESS_DRIVER_RECORD: DriverEntry = DriverEntry {
     name: "pciexpress",
     req: &["pcie_ecam"],
     provides: &[],
-    ctor: PciExpressDriver::new
+    ctor: PciExpressDriver::new,
 };

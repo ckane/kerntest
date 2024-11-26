@@ -1,8 +1,7 @@
-use crate::{GKARG, KERNEL, KLOG};
 use crate::acpi::AcpiDriver;
-use crate::cpu::{Processor, add_cpu, add_thread};
 use crate::allocator::{PageAllocator, KERN_ALLOC};
-use crate::driver::{DRIVERS, Driver, DriverBus, DriverEntry};
+use crate::cpu::{add_cpu, add_thread, Processor};
+use crate::driver::{Driver, DriverBus, DriverEntry, DRIVERS};
 use crate::exceptions::{attach_exceptions, timer_queued};
 use crate::interrupts::{
     Gdtr, GlobalDescriptorEntry, Idtr, InterruptDescriptorEntry, InterruptStack,
@@ -11,8 +10,11 @@ use crate::interrupts::{
 use crate::klog::KernLogger;
 use crate::memdrv::{MemDriver, MEM_DRIVER};
 use crate::thread::Thread;
+use crate::{GKARG, KERNEL, KLOG};
+use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::alloc::GlobalAlloc;
 use core::any::Any;
@@ -20,11 +22,9 @@ use core::arch::asm;
 use core::fmt::Write;
 use core::ops::Deref;
 use core::ptr::addr_of_mut;
+use core::sync::atomic::{AtomicPtr, Ordering};
 use log::{error, info, trace};
 use snafu::prelude::*;
-use alloc::boxed::Box;
-use alloc::sync::Arc;
-use core::sync::atomic::{AtomicPtr, Ordering};
 
 pub struct Kernel {
     gdtr: Gdtr,
@@ -48,12 +48,14 @@ pub(crate) enum Error {
     Acpi { acpi_detail: acpi::AcpiError },
 
     /// Driver subsystem error
-    Driver { source: crate::driver::Error }
+    Driver { source: crate::driver::Error },
 }
 
 impl From<acpi::AcpiError> for Error {
     fn from(acpierr: acpi::AcpiError) -> Self {
-        Self::Acpi { acpi_detail: acpierr }
+        Self::Acpi {
+            acpi_detail: acpierr,
+        }
     }
 }
 
@@ -122,7 +124,8 @@ impl Kernel {
         self.gdt.push(GlobalDescriptorEntry::new_dataseg(0));
 
         if let (Some(istp), istlen) = (self.ist.get_ist_ptr(), self.ist.get_ist_len_bytes()) {
-            self.gdt.push(GlobalDescriptorEntry::new_istseg(istp as usize, istlen));
+            self.gdt
+                .push(GlobalDescriptorEntry::new_istseg(istp as usize, istlen));
             info!("IST pointer: {:#018x}", istp as usize);
         } else {
             panic!("IST failed to initialize or is corrupted");
@@ -139,11 +142,13 @@ impl Kernel {
 
         self.gdtr.lgdt(0x10, 0x20);
         info!("Loaded new GDTR and transferred execution");
-        unsafe { asm!(
-            "mov rax, {}",
-            "ltr ax",
-            in(reg) 0x30 as usize,
-        )};
+        unsafe {
+            asm!(
+                "mov rax, {}",
+                "ltr ax",
+                in(reg) 0x30 as usize,
+            )
+        };
         info!("Loaded new IST from GDTR");
     }
 
@@ -183,17 +188,17 @@ impl Kernel {
             {
                 if page != testlist[testlist.len() - 1] {
                     Err(Error::AllocatorTest {
-                        description: format!("Failure unexpected testing page {page:#018x}, {pt:#018x}")
+                        description: format!(
+                            "Failure unexpected testing page {page:#018x}, {pt:#018x}"
+                        ),
                     })?
                 }
             }
         }
         info!("vtop tests passed (above error is expected)");
 
-        Self::test_palloc(300000).map_err(|e| {
-            Error::AllocatorTest {
-                description: format!("Page alloc tests failed: {e}")
-            }
+        Self::test_palloc(300000).map_err(|e| Error::AllocatorTest {
+            description: format!("Page alloc tests failed: {e}"),
         })?;
 
         let f = &mut [core::ptr::null_mut(); 6097];
@@ -201,9 +206,9 @@ impl Kernel {
         for i in f.iter_mut() {
             let sz = 43;
             *i = unsafe { KERN_ALLOC.alloc(core::alloc::Layout::from_size_align_unchecked(sz, 8)) };
-            if (*i).is_null()  {
-                Err(Error::AllocatorTest { 
-                    description: format!("Failed to alloc in 6097 loop")
+            if (*i).is_null() {
+                Err(Error::AllocatorTest {
+                    description: format!("Failed to alloc in 6097 loop"),
                 })?
             }
             trace!("Allocated {} bytes: {:#018x}", sz, *i as usize);
@@ -257,21 +262,24 @@ impl Kernel {
                 if String::from(*p) == String::from("log") {
                     info!("Registering new logger: {}", d.name);
                 }
-            };
+            }
             completed += 1;
-        };
+        }
 
         while completed < DRIVERS.len() {
             // Then, load all drivers with pre-reqs
             let d_provs_c = d_provs.clone();
-            for d in DRIVERS.iter().filter(|x| x.req.len() > 0 && x.req.iter().all(|y| d_provs_c.contains(y))) {
+            for d in DRIVERS
+                .iter()
+                .filter(|x| x.req.len() > 0 && x.req.iter().all(|y| d_provs_c.contains(y)))
+            {
                 self.register_driver(d);
                 for p in d.provides {
                     d_provs.insert(p);
-                };
+                }
                 completed += 1;
-            };
-        };
+            }
+        }
 
         Ok(())
     }
@@ -289,20 +297,19 @@ impl Kernel {
         self.initialize_ist();
         self.initialize_idt();
 
-        unsafe {asm!(
-            "int3",
-            options(nomem, nostack)
-        )};
+        unsafe { asm!("int3", options(nomem, nostack)) };
 
         let core_id = 0u64;
-        unsafe { asm!(
-            "mov rdx, {}",
-            "mov rax, rdx",
-            "shr rdx, 32",
-            "mov ecx, 0xc0000103",
-            "wrmsr",
-            in(reg) core_id
-        ) };
+        unsafe {
+            asm!(
+                "mov rdx, {}",
+                "mov rax, rdx",
+                "shr rdx, 32",
+                "mov ecx, 0xc0000103",
+                "wrmsr",
+                in(reg) core_id
+            )
+        };
         self.cpus.push(Processor::new(0));
         add_cpu();
 
@@ -354,35 +361,52 @@ extern "C" fn thread1(th: u64) {
 }
 
 impl DriverBus for Kernel {
-    fn set(&self, s: &str, val: Arc<dyn Any + Sync +Send>) -> core::result::Result<(), crate::driver::Error> {
+    fn set(
+        &self,
+        s: &str,
+        val: Arc<dyn Any + Sync + Send>,
+    ) -> core::result::Result<(), crate::driver::Error> {
         // First find the appropriate provider of s
         for d in DRIVERS.iter() {
             if let Some(_) = d.provides.iter().position(|&x| x == s) {
                 trace!("Found [{}] at driver [{}]", s, d.name);
-                return self.drivers.get(d.name)
+                return self
+                    .drivers
+                    .get(d.name)
                     .and_then(|x| x.set(s, val).ok())
-                    .ok_or(crate::driver::Error::AssetFatalError { name: String::from(s) });
+                    .ok_or(crate::driver::Error::AssetFatalError {
+                        name: String::from(s),
+                    });
             };
-        };
+        }
 
         // If a scan of the list doesn't find the attribute we're searching for,
         // then report that it doesn't exist
-        Err(crate::driver::Error::AssetNotProvided { name: String::from(s) })
+        Err(crate::driver::Error::AssetNotProvided {
+            name: String::from(s),
+        })
     }
 
-    fn get(&self, s: &str) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
+    fn get(
+        &self,
+        s: &str,
+    ) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
         // First find the appropriate provider of s
         for d in DRIVERS.iter() {
             if let Some(_) = d.provides.iter().position(|&x| x == s) {
                 trace!("Found [{}] at driver [{}]", s, d.name);
-                return self.drivers.get(d.name)
-                    .and_then(|x| x.get(s).ok())
-                    .ok_or(crate::driver::Error::AssetFatalError { name: String::from(s) });
+                return self.drivers.get(d.name).and_then(|x| x.get(s).ok()).ok_or(
+                    crate::driver::Error::AssetFatalError {
+                        name: String::from(s),
+                    },
+                );
             };
-        };
+        }
 
         // If a scan of the list doesn't find the attribute we're searching for,
         // then report that it doesn't exist
-        Err(crate::driver::Error::AssetNotProvided { name: String::from(s) })
+        Err(crate::driver::Error::AssetNotProvided {
+            name: String::from(s),
+        })
     }
 }

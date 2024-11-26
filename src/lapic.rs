@@ -1,11 +1,11 @@
-use crate::driver::{DRIVERS, Driver, DriverBus, DriverEntry, DriverError};
 use crate::acpi::{LocalApicData, NmiInfo};
+use crate::driver::{Driver, DriverBus, DriverEntry, DriverError, DRIVERS};
 use crate::memdrv::PatTypes;
 use crate::physmap::PhysMapper;
 
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use alloc::string::String;
 use core::any::Any;
 use core::arch::asm;
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -31,12 +31,15 @@ impl Driver for LocalApicDriver {
             "timerint" => {
                 //self.set_reg_addr(0x380, 0x1000000);
                 Ok(self.set_reg_addr(0xb0, 0))
-            },
-            _ => Err(DriverError::AssetNotProvided { name: s.into() })
+            }
+            _ => Err(DriverError::AssetNotProvided { name: s.into() }),
         }
     }
 
-    fn get(&self, s: &str) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
+    fn get(
+        &self,
+        s: &str,
+    ) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
         Err(DriverError::AssetNotProvided { name: s.into() })
     }
 }
@@ -44,8 +47,16 @@ impl Driver for LocalApicDriver {
 impl LocalApicDriver {
     fn init(bus: &dyn DriverBus) -> core::result::Result<Self, crate::driver::Error> {
         if let Ok(lapic_data) = bus.get("lapic")?.downcast::<LocalApicData>() {
-            let lapic_remap = unsafe { PhysMapper::map_phys::<u32>(lapic_data.get_phys_addr(), 0x1000, PatTypes::Uncacheable) }
-                .map_err(|e| crate::driver::Error::Initialization { reason: format!("{:?}", e) })?;
+            let lapic_remap = unsafe {
+                PhysMapper::map_phys::<u32>(
+                    lapic_data.get_phys_addr(),
+                    0x1000,
+                    PatTypes::Uncacheable,
+                )
+            }
+            .map_err(|e| crate::driver::Error::Initialization {
+                reason: format!("{:?}", e),
+            })?;
             // Construct a new Self and populate it with the LAPIC data
             let s = Self {
                 lapic_phys: lapic_data.get_phys_addr(),
@@ -53,7 +64,10 @@ impl LocalApicDriver {
                 lapic_vaddr: AtomicPtr::new(lapic_remap.get_vptr()),
             };
 
-            info!("Found LAPIC @ {:#018x}, nmi lines: {:?}", s.lapic_phys, s.nmi_lines);
+            info!(
+                "Found LAPIC @ {:#018x}, nmi lines: {:?}",
+                s.lapic_phys, s.nmi_lines
+            );
             info!("Mapped LAPIC @ {:?}", s.lapic_vaddr);
 
             s.set_reg_addr(0x80, 0);
@@ -74,12 +88,7 @@ impl LocalApicDriver {
             s.set_reg_addr(0x80, 0);
 
             // Enable the LAPIC (if it isn't already) via MSR 0x1b
-            unsafe { asm!(
-                "mov ecx, 0x1b",
-                "rdmsr",
-                "bts eax, 11",
-                "wrmsr",
-            ) };
+            unsafe { asm!("mov ecx, 0x1b", "rdmsr", "bts eax, 11", "wrmsr",) };
 
             // Set Spurious Interrupt LVT
             s.set_reg_addr(0xf0, 0x1ff);
@@ -104,19 +113,31 @@ impl LocalApicDriver {
             info!("LAPIC SIVR {:#10x}", s.get_reg_addr(0xf0));
             Ok(s)
         } else {
-            Err(crate::driver::Error::Initialization { reason: "Failed to get lapic from bus".into() })
+            Err(crate::driver::Error::Initialization {
+                reason: "Failed to get lapic from bus".into(),
+            })
         }
     }
 
     /// Get a register value, given the byte offset
     fn get_reg_addr(&self, index: usize) -> u32 {
-        let lapic_slice = unsafe { core::slice::from_raw_parts_mut(self.lapic_vaddr.load(Ordering::Relaxed) as *mut u32, 0x400) };
+        let lapic_slice = unsafe {
+            core::slice::from_raw_parts_mut(
+                self.lapic_vaddr.load(Ordering::Relaxed) as *mut u32,
+                0x400,
+            )
+        };
         lapic_slice[index >> 2]
     }
 
     /// Set a register value, given the byte offset
     fn set_reg_addr(&self, index: usize, val: u32) {
-        let lapic_slice = unsafe { core::slice::from_raw_parts_mut(self.lapic_vaddr.load(Ordering::Relaxed) as *mut u32, 0x400) };
+        let lapic_slice = unsafe {
+            core::slice::from_raw_parts_mut(
+                self.lapic_vaddr.load(Ordering::Relaxed) as *mut u32,
+                0x400,
+            )
+        };
         lapic_slice[index >> 2] = val;
     }
 }
@@ -126,5 +147,5 @@ pub static LAPIC_DRIVER_RECORD: DriverEntry = DriverEntry {
     name: "lapic",
     req: &["lapic"],
     provides: &["timerint"],
-    ctor: LocalApicDriver::new
+    ctor: LocalApicDriver::new,
 };

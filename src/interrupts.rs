@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::fmt::write;
-use snafu::Snafu;
 use log::info;
+use snafu::Snafu;
 
 /// Value to load into GDTR. Implemented as a 128-bit value, but only
 /// the lower 80 bits are used (16b length + 64b base). Implements some
@@ -59,9 +59,15 @@ pub(crate) type ExceptionFnWithErrorCode = extern "x86-interrupt" fn(InterruptSt
 
 impl core::fmt::Debug for InterruptStack {
     /// Write out the contents of an InterruptStack
-    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
-        write!(fmt, "{{ rip: {:#018x}, cs: {:#06x}, rflags: {:#018x}, rsp: {:#018x}, ss: {:#06x} }}",
-            self.rip, self.cs, self.rfl, self.rsp, self.ss)
+    fn fmt(
+        &self,
+        fmt: &mut core::fmt::Formatter<'_>,
+    ) -> core::result::Result<(), core::fmt::Error> {
+        write!(
+            fmt,
+            "{{ rip: {:#018x}, cs: {:#06x}, rflags: {:#018x}, rsp: {:#018x}, ss: {:#06x} }}",
+            self.rip, self.cs, self.rfl, self.rsp, self.ss
+        )
     }
 }
 
@@ -244,14 +250,22 @@ impl InterruptStackTable {
 
     /// Returns Some(()) if port is permitted in IOPB, and None if not permitted
     pub fn get_iop(&self, port: u16) -> Option<()> {
-        ((self.entries[IOPB_OFFSET as usize + (port as usize) / 32] >> (port as usize % 8)) & 0x1 == 0).then(|| ())
+        ((self.entries[IOPB_OFFSET as usize + (port as usize) / 32] >> (port as usize % 8)) & 0x1
+            == 0)
+            .then(|| ())
     }
 
     /// Set whether a port in the IOPB is enabled or disabled
     pub fn set_iop(&mut self, port: u16, enable: bool) {
         match enable {
-            true => self.entries[IOPB_OFFSET as usize + (port as usize) / 32] &= !1 << (port as usize % 8),
-            false => self.entries[IOPB_OFFSET as usize + (port as usize) / 32] |= 1 << (port as usize % 8),
+            true => {
+                self.entries[IOPB_OFFSET as usize + (port as usize) / 32] &=
+                    !1 << (port as usize % 8)
+            }
+            false => {
+                self.entries[IOPB_OFFSET as usize + (port as usize) / 32] |=
+                    1 << (port as usize % 8)
+            }
         }
     }
 
@@ -281,7 +295,7 @@ impl core::fmt::Debug for InterruptStackTable {
             ISTStacks::IST7,
         ] {
             write!(f, "IST{}: {:#018x}, ", usize::from(i), self.get_ist(i))?;
-        };
+        }
 
         for r in [
             ISTPrivilegeStack::RSP0,
@@ -289,7 +303,7 @@ impl core::fmt::Debug for InterruptStackTable {
             ISTPrivilegeStack::RSP2,
         ] {
             write!(f, "RSP{}: {:#018x}, ", usize::from(r), self.get_rsp(r))?;
-        };
+        }
         write!(f, " }}")?;
 
         Ok(())
@@ -398,8 +412,7 @@ impl Gdtr {
                 (gdt.len() as u128 * (core::mem::size_of::<GlobalDescriptorEntry>() as u128) - 1)
             } else {
                 0
-            }
-                | (gdt.as_ptr() as u128) << 16,
+            } | (gdt.as_ptr() as u128) << 16,
         )
     }
 
@@ -435,8 +448,7 @@ impl Idtr {
                 (idt.len() as u128 * (core::mem::size_of::<InterruptDescriptorEntry>() as u128) - 1)
             } else {
                 0
-            }
-                | (idt.as_ptr() as u128) << 16,
+            } | (idt.as_ptr() as u128) << 16,
         )
     }
 

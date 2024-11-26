@@ -42,9 +42,7 @@ impl IntData {
     }
 }
 
-static mut INT_DATA: IntData = IntData {
-    avail: vec![],
-};
+static mut INT_DATA: IntData = IntData { avail: vec![] };
 
 /// Each mapped segment is 4kB
 const SEG_SHIFT: usize = 13;
@@ -53,13 +51,22 @@ const MAP_BASE: usize = 0xffffc00000000000;
 const MAP_COUNTS: usize = 10240;
 
 impl PhysMapper {
-    pub unsafe fn map_phys<T>(phys_addr: usize, size: usize, pat: crate::memdrv::PatTypes) -> Result<PhysMap<T>> {
+    pub unsafe fn map_phys<T>(
+        phys_addr: usize,
+        size: usize,
+        pat: crate::memdrv::PatTypes,
+    ) -> Result<PhysMap<T>> {
         // If INT_DATA uninitialized, then initialize it
         if INT_DATA.avail.is_empty() {
             INT_DATA.initialize(MAP_COUNTS)
         }
 
-        trace!("Req: {:#018x} len {:#018x} T: {}", phys_addr, size, core::mem::size_of::<T>());
+        trace!(
+            "Req: {:#018x} len {:#018x} T: {}",
+            phys_addr,
+            size,
+            core::mem::size_of::<T>()
+        );
 
         // Calculate the physical base addr on its nearest page boundary
         let pbase = phys_addr & !0xfffusize;
@@ -79,13 +86,13 @@ impl PhysMapper {
                 if *val != w[0] + i {
                     sequence = false;
                     break;
-                } 
+                }
             }
             if sequence {
                 seq_idx = j;
                 break;
             }
-        };
+        }
 
         // If we validated the set was a sequence, then perform a mapping across it
         if sequence {
@@ -96,13 +103,16 @@ impl PhysMapper {
                     MEM_DRIVER.map_vtop(
                         MAP_BASE + (vseg << SEG_SHIFT) + (p << 12usize),
                         pbase + (pseg << SEG_SHIFT) + (p << 12usize),
-                        pat
+                        pat,
                     );
                 }
             }
 
             let struct_addr = MAP_BASE + (vseg_start << SEG_SHIFT) + (phys_addr & 0xfffusize);
-            Ok(PhysMap::<T> { vptr: struct_addr as *mut T, size: adj_size })
+            Ok(PhysMap::<T> {
+                vptr: struct_addr as *mut T,
+                size: adj_size,
+            })
         } else {
             Err(Error::NoMoreMappings)
         }
@@ -122,8 +132,17 @@ impl PhysMapper {
                 for s in vstart..end_segs {
                     // Unmap all the backing pages
                     for p in 0..(MAP_SIZE >> 12) {
-                        trace!("Unmapping: {:#018x}", MAP_BASE + ((vstart + end_segs - s - 1usize) << SEG_SHIFT) + (p << 12usize));
-                        MemDriver::unmap_vmap(MAP_BASE + ((vstart + end_segs - s - 1usize) << SEG_SHIFT) + (p << 12usize));
+                        trace!(
+                            "Unmapping: {:#018x}",
+                            MAP_BASE
+                                + ((vstart + end_segs - s - 1usize) << SEG_SHIFT)
+                                + (p << 12usize)
+                        );
+                        MemDriver::unmap_vmap(
+                            MAP_BASE
+                                + ((vstart + end_segs - s - 1usize) << SEG_SHIFT)
+                                + (p << 12usize),
+                        );
                     }
 
                     // Insert the freed segment back on the segment list in the appropriate sorted

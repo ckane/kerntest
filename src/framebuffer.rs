@@ -27,7 +27,7 @@ pub struct UnsafeFrameBuffer {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SimpleFb {
-    configured: bool
+    configured: bool,
 }
 
 impl SimpleFb {

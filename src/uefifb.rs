@@ -1,8 +1,8 @@
-use crate::GKARG;
-use crate::driver::{DRIVERS, Driver, DriverBus, DriverEntry, DriverError};
+use crate::driver::{Driver, DriverBus, DriverEntry, DriverError, DRIVERS};
 use crate::framebuffer::UnsafeFrameBuffer;
 use crate::memdrv::PatTypes;
 use crate::physmap::PhysMapper;
+use crate::GKARG;
 
 use core::fmt::Write;
 use embedded_graphics::{
@@ -42,8 +42,16 @@ impl TryFrom<&mut UnsafeFrameBuffer> for UefiFrameBuffer {
     type Error = DriverError;
 
     fn try_from(ufb: &mut UnsafeFrameBuffer) -> core::result::Result<Self, Self::Error> {
-        if let Ok(remap_fb) = unsafe { PhysMapper::map_phys::<u32>(ufb.get_fb() as usize, ufb.fbsize(), PatTypes::WriteCombining) } {
-            let mut old_buffer = unsafe { core::slice::from_raw_parts_mut(ufb.get_fb() as *mut u32, ufb.fbsize() >> 2) };
+        if let Ok(remap_fb) = unsafe {
+            PhysMapper::map_phys::<u32>(
+                ufb.get_fb() as usize,
+                ufb.fbsize(),
+                PatTypes::WriteCombining,
+            )
+        } {
+            let mut old_buffer = unsafe {
+                core::slice::from_raw_parts_mut(ufb.get_fb() as *mut u32, ufb.fbsize() >> 2)
+            };
             Ok(Self {
                 fb: AtomicPtr::new(remap_fb.get_vptr()),
                 fbsize: ufb.fbsize(),
@@ -57,7 +65,9 @@ impl TryFrom<&mut UnsafeFrameBuffer> for UefiFrameBuffer {
                 draw_buffer: Vec::from(old_buffer), // Creates a new local (cached) mem buffer
             })
         } else {
-            Err(Self::Error::Initialization { reason: String::from("Failed mapping framebuffer") })?
+            Err(Self::Error::Initialization {
+                reason: String::from("Failed mapping framebuffer"),
+            })?
         }
     }
 }
@@ -82,7 +92,10 @@ impl DrawTarget for UefiFrameBuffer {
             if (x < self.fx as i32) && (y < self.fy as i32) {
                 /* Calculate offset into framebuffer */
                 let offset = (y as u32 * (self.stride)) + (x as u32);
-                self.draw_buffer[offset as usize] = 0xff000000 + ((color.r() as u32) << 16) + ((color.g() as u32) << 8) + (color.b() as u32);
+                self.draw_buffer[offset as usize] = 0xff000000
+                    + ((color.r() as u32) << 16)
+                    + ((color.g() as u32) << 8)
+                    + (color.b() as u32);
             }
         }
         Ok(())
@@ -152,14 +165,19 @@ impl Write for UefiFrameBuffer {
             }
         }
         // Copy the local mem buffer to the HW framebuffer (page flip)
-        let fb = unsafe { core::slice::from_raw_parts_mut(self.fb.load(Ordering::Relaxed), self.fbsize / 4) };
+        let fb = unsafe {
+            core::slice::from_raw_parts_mut(self.fb.load(Ordering::Relaxed), self.fbsize / 4)
+        };
         fb.clone_from_slice(self.draw_buffer.as_slice());
         Ok(())
     }
 }
 
 impl Driver for UefiFrameBuffer {
-    fn new(bus: &mut dyn DriverBus) -> Result<alloc::sync::Arc<dyn Driver>, DriverError> where Self: Sized {
+    fn new(bus: &mut dyn DriverBus) -> Result<alloc::sync::Arc<dyn Driver>, DriverError>
+    where
+        Self: Sized,
+    {
         let mut karg = unsafe { (*GKARG).clone() };
         let s = Arc::new(Self::try_from(karg.get_fb())?);
         crate::klog::KernLogger::set_log_output(Arc::as_ptr(&s) as *mut UefiFrameBuffer);
@@ -167,16 +185,23 @@ impl Driver for UefiFrameBuffer {
         Ok(s)
     }
 
-    fn set(&self, s: &str, val: Arc<dyn Any + Send + Sync>) -> core::result::Result<(), crate::driver::Error> {
+    fn set(
+        &self,
+        s: &str,
+        val: Arc<dyn Any + Send + Sync>,
+    ) -> core::result::Result<(), crate::driver::Error> {
         Err(DriverError::AssetNotProvided { name: s.into() })
     }
 
-    fn get(&self, s: &str) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
+    fn get(
+        &self,
+        s: &str,
+    ) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
         match s {
-            "framebuffer" => {
-                Ok(Arc::new(self.fb.load(Ordering::Relaxed) as usize))
-            },
-            _ => Err(crate::driver::Error::AssetNotProvided { name: String::from(s) }),
+            "framebuffer" => Ok(Arc::new(self.fb.load(Ordering::Relaxed) as usize)),
+            _ => Err(crate::driver::Error::AssetNotProvided {
+                name: String::from(s),
+            }),
         }
     }
 }
@@ -192,7 +217,8 @@ impl UefiFrameBuffer {
         };
         self.s2s_blit(src_range, Point { x: 0, y: 0 });
         let blk_offset = (self.fy - 20) * self.stride;
-        self.draw_buffer.get_mut(blk_offset as usize..((self.fy * self.stride) as usize))
+        self.draw_buffer
+            .get_mut(blk_offset as usize..((self.fy * self.stride) as usize))
             .unwrap()
             .fill(0);
         //let fb = unsafe { core::slice::from_raw_parts_mut(self.fb.load(Ordering::Relaxed), self.fbsize / 4) };
@@ -213,7 +239,8 @@ impl UefiFrameBuffer {
             let old_offset = ((tly + ypos) * (self.stride as usize)) + (tlx);
             let new_offset = ((dst_top_left.y as usize + ypos) * (self.stride as usize))
                 + (dst_top_left.x as usize);
-            self.draw_buffer.copy_within(old_offset..(old_offset + maxw), new_offset);
+            self.draw_buffer
+                .copy_within(old_offset..(old_offset + maxw), new_offset);
         }
     }
 }
@@ -223,5 +250,5 @@ pub static UEFIFB_DRIVER_RECORD: DriverEntry = DriverEntry {
     name: "uefifb",
     req: &[],
     provides: &["framebuffer", "log"],
-    ctor: UefiFrameBuffer::new
+    ctor: UefiFrameBuffer::new,
 };

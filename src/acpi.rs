@@ -1,33 +1,28 @@
+use crate::driver::{Driver, DriverBus, DriverEntry, DriverError, DRIVERS};
+use crate::memdrv::PatTypes;
+use crate::physmap::PhysMapper;
+use crate::GKARG;
 use acpi::{
-    AcpiError, AcpiTables,
     handler::{AcpiHandler, PhysicalMapping},
     hpet::HpetInfo,
     madt::IoApicEntry,
     mcfg::{PciConfigEntry, PciConfigRegions},
     platform::{
         interrupt::{
-            IoApic,
-            InterruptModel,
-            InterruptSourceOverride,
-            LocalInterruptLine,
-            NmiLine,
-            NmiProcessor,
-            NmiSource,
+            InterruptModel, InterruptSourceOverride, IoApic, LocalInterruptLine, NmiLine,
+            NmiProcessor, NmiSource,
         },
         PlatformInfo,
     },
+    AcpiError, AcpiTables,
 };
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
-use crate::GKARG;
 use linkme::distributed_slice;
 use log::{info, trace};
 use snafu::prelude::*;
-use crate::driver::{DRIVERS, Driver, DriverBus, DriverEntry, DriverError};
-use crate::memdrv::PatTypes;
-use crate::physmap::PhysMapper;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -56,7 +51,7 @@ impl From<NmiProcessor> for NmiProc {
     fn from(nmi_processor: NmiProcessor) -> Self {
         match nmi_processor {
             NmiProcessor::All => NmiProc::All,
-            NmiProcessor::ProcessorUid(i) => NmiProc::Uid(i)
+            NmiProcessor::ProcessorUid(i) => NmiProc::Uid(i),
         }
     }
 }
@@ -142,20 +137,24 @@ struct VirtAcpiHandler;
 #[derive(Snafu, Debug)]
 enum Error {
     /// ACPI Subsystem error
-    Acpi { acpi_detail: acpi::AcpiError }
+    Acpi { acpi_detail: acpi::AcpiError },
 }
 
 type Result<T> = core::result::Result<T, Error>;
 
 impl From<AcpiError> for Error {
     fn from(acpierr: AcpiError) -> Self {
-        Self::Acpi { acpi_detail: acpierr }
+        Self::Acpi {
+            acpi_detail: acpierr,
+        }
     }
 }
 
 impl From<Error> for crate::driver::Error {
     fn from(err: Error) -> Self {
-        Self::Initialization { reason: format!("{:?}", err) }
+        Self::Initialization {
+            reason: format!("{:?}", err),
+        }
     }
 }
 
@@ -173,28 +172,35 @@ impl From<PciConfigEntry> for EcamSegment {
 }
 
 impl Driver for AcpiDriver {
-    fn new(_bus: &mut dyn DriverBus) -> core::result::Result<Arc<dyn Driver>, crate::driver::Error> {
+    fn new(
+        _bus: &mut dyn DriverBus,
+    ) -> core::result::Result<Arc<dyn Driver>, crate::driver::Error> {
         Ok(Arc::new(Self::init()?))
     }
 
-    fn set(&self, s: &str, val: Arc<dyn Any + Send + Sync>) -> core::result::Result<(), crate::driver::Error> {
+    fn set(
+        &self,
+        s: &str,
+        val: Arc<dyn Any + Send + Sync>,
+    ) -> core::result::Result<(), crate::driver::Error> {
         Err(DriverError::AssetNotProvided { name: s.into() })
     }
 
-    fn get(&self, s: &str) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
+    fn get(
+        &self,
+        s: &str,
+    ) -> core::result::Result<Arc<dyn Any + Sync + Send>, crate::driver::Error> {
         match s {
             "pcie_ecam" => {
                 let pe = self.get_pcie_regions()?;
                 info!("Ecams in match: {:?}", pe);
                 Ok(Arc::new(AcpiDriverData::EcamPointer(pe)))
-            },
-            "hpet_info" => {
-                Ok(self.hpet.clone())
-            },
-            "lapic" => {
-                Ok(Arc::new(self.get_local_apic()?))
-            },
-            _ => Err(crate::driver::Error::AssetNotProvided { name: String::from(s) }),
+            }
+            "hpet_info" => Ok(self.hpet.clone()),
+            "lapic" => Ok(Arc::new(self.get_local_apic()?)),
+            _ => Err(crate::driver::Error::AssetNotProvided {
+                name: String::from(s),
+            }),
         }
     }
 }
@@ -233,7 +239,10 @@ impl AcpiDriver {
         }
         info!("LAPIC paddr: {:#018x}", lapic_phys);
         for ioapic in ioapics.iter() {
-            info!("IOAPIC #{} paddr: {:#018x}, start: {}", ioapic.id, ioapic.address as usize, ioapic.global_system_interrupt_base);
+            info!(
+                "IOAPIC #{} paddr: {:#018x}, start: {}",
+                ioapic.id, ioapic.address as usize, ioapic.global_system_interrupt_base
+            );
         }
 
         Ok(Self {
@@ -252,11 +261,20 @@ impl AcpiDriver {
         let pci_regions = PciConfigRegions::new(&self.acpi)?;
         let mut pcie_ecam = vec![];
         for pcir in pci_regions.iter() {
-            info!("Pci Region: {:#018x} SG:{:#06x} Rng: {:#04x}-{:#04x}", pcir.physical_address, pcir.segment_group,
-                pcir.bus_range.start(), pcir.bus_range.end());
+            info!(
+                "Pci Region: {:#018x} SG:{:#06x} Rng: {:#04x}-{:#04x}",
+                pcir.physical_address,
+                pcir.segment_group,
+                pcir.bus_range.start(),
+                pcir.bus_range.end()
+            );
             pcie_ecam.push(EcamSegment::from(pcir).clone());
-        };
-        info!("Ecams: {:?} {:#018x}", pcie_ecam, pcie_ecam.as_ptr() as usize);
+        }
+        info!(
+            "Ecams: {:?} {:#018x}",
+            pcie_ecam,
+            pcie_ecam.as_ptr() as usize
+        );
         Ok(pcie_ecam)
     }
 
@@ -273,19 +291,29 @@ pub static ACPI_DRIVER_RECORD: DriverEntry = DriverEntry {
     name: "acpi",
     req: &[],
     provides: &["pcie_ecam", "hpet_info", "acpi", "lapic"],
-    ctor: AcpiDriver::new
+    ctor: AcpiDriver::new,
 };
 
-
 impl AcpiHandler for VirtAcpiHandler {
-    unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> PhysicalMapping<Self, T> {
+    unsafe fn map_physical_region<T>(
+        &self,
+        physical_address: usize,
+        size: usize,
+    ) -> PhysicalMapping<Self, T> {
         if let Ok(vmap) = PhysMapper::map_phys(physical_address, size, PatTypes::Uncacheable) {
-            let pm = PhysicalMapping::new(physical_address,
+            let pm = PhysicalMapping::new(
+                physical_address,
                 core::ptr::NonNull::<T>::new_unchecked(vmap.get_vptr()),
                 size,
                 vmap.get_size(),
-                self.clone());
-            trace!("Mapped {:#018x} len {:#018x} to {:#018x}", pm.physical_start(), pm.mapped_length(), vmap.get_vptr() as usize);
+                self.clone(),
+            );
+            trace!(
+                "Mapped {:#018x} len {:#018x} to {:#018x}",
+                pm.physical_start(),
+                pm.mapped_length(),
+                vmap.get_vptr() as usize
+            );
             return pm;
         }
 
@@ -293,10 +321,13 @@ impl AcpiHandler for VirtAcpiHandler {
     }
 
     fn unmap_physical_region<T>(region: &PhysicalMapping<Self, T>) {
-        trace!("Unmap for {:#018x} len {:#018x} at {:#018x}", region.physical_start(), region.mapped_length(),
-              region.virtual_start().as_ptr() as usize);
+        trace!(
+            "Unmap for {:#018x} len {:#018x} at {:#018x}",
+            region.physical_start(),
+            region.mapped_length(),
+            region.virtual_start().as_ptr() as usize
+        );
 
         PhysMapper::unmap(region.virtual_start().as_ptr(), region.mapped_length());
-
     }
 }

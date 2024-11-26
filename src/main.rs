@@ -40,10 +40,10 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use allocator::{PageAllocator, KERN_ALLOC};
-use klog::KernLogger;
-use memdrv::{MemDriver, MEM_DRIVER};
 use driver::DriverEntry;
+use klog::KernLogger;
 use linkme::distributed_slice;
+use memdrv::{MemDriver, MEM_DRIVER};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
