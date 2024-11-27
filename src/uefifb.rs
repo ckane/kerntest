@@ -106,7 +106,6 @@ impl DrawTarget for UefiFrameBuffer {
 impl Write for UefiFrameBuffer {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         /* TODO - smarter about breaking too-long strings. */
-        let _lock = CritSection::new();
         for i in 0..s.len() {
             let text_style = MonoTextStyle::new(&FONT_6X10, Rgb888::YELLOW);
             if (self.txtcur_y * 10) + 20 < self.fy as usize {
