@@ -20,6 +20,7 @@ mod memdrv;
 mod paging;
 mod pciexpress;
 mod physmap;
+mod sync;
 mod thread;
 mod uefifb;
 
