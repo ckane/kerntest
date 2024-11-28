@@ -27,6 +27,14 @@ impl Processor {
     fn preempt_thread(&mut self) {
         // self.runq.push_back(self.active.unwrap().clone());
     }
+
+    pub(crate) fn kill_active_thread(&mut self) {
+        self.active.take();
+    }
+
+    pub(crate) fn active_thread(&self) -> Option<&Thread> {
+        self.active.as_deref()
+    }
 }
 
 pub fn add_cpu() {
@@ -40,6 +48,14 @@ pub fn add_thread(id: u64, mut th: Box<Thread>) {
         th.set_queued();
         CPUS[id as usize].runq.push_back(th);
     }
+}
+
+pub fn get_cpu(id: usize) -> Option<&'static Processor> {
+    unsafe { CPUS.get(id) }
+}
+
+pub fn get_cpu_mut(id: usize) -> Option<&'static mut Processor> {
+    unsafe { CPUS.get_mut(id) }
 }
 
 /// Save the current context

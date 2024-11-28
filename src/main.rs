@@ -48,7 +48,16 @@ use memdrv::{MemDriver, MEM_DRIVER};
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    error!("Panic, halting: {}", info);
+    if let Some(th) = crate::cpu::get_cpu(crate::cpu::get_core_id() as usize).and_then(|k| k.active_thread()) {
+        error!("Thread {} Panic, halting: {}", th.get_id(), info);
+    } else {
+        error!("Panic, halting: {}", info);
+    }
+
+    // Kill the current thread:
+    if let Some(k) = unsafe { KERNEL.get_mut(0) } {
+        k.kill_cur_thread();
+    }
     unsafe { asm!("2:", "hlt", "jmp 2b", options(noreturn)) };
 }
 

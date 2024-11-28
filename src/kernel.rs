@@ -338,6 +338,16 @@ impl Kernel {
             unsafe { asm!("hlt") };
         }
     }
+
+    pub fn cur_thread(&self) -> Option<&Thread> {
+        let core_id = crate::cpu::get_core_id() as usize;
+        self.cpus.get(core_id).and_then(|x| x.active_thread())
+    }
+
+    pub fn kill_cur_thread(&mut self) {
+        let core_id = crate::cpu::get_core_id() as usize;
+        self.cpus.get_mut(core_id).and_then(|x| Some(x.kill_active_thread()));
+    }
 }
 
 extern "C" fn thread1(th: u64) {

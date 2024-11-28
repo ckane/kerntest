@@ -123,4 +123,8 @@ impl Thread {
     pub fn set_queued(&mut self) {
         self.state = ThreadState::Queued;
     }
+
+    pub fn get_id(&self) -> usize {
+        self.id
+    }
 }
