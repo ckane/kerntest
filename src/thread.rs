@@ -77,6 +77,14 @@ pub(crate) struct Thread {
     stack: alloc::boxed::Box<Vec<usize>>,
 }
 
+pub trait ThreadFunc: Send + Sync {
+    extern "C" fn start_thread(&mut self);
+
+    fn thread_entry(&mut self) -> alloc::boxed::Box<&mut (dyn ThreadFunc + Send + Sync)> where Self: Sized {
+        alloc::boxed::Box::new(self)
+    }
+}
+
 impl Thread {
     pub fn new(id: usize, ss: u64, cs: u64, rip: u64) -> Self {
         let mut s = Self {

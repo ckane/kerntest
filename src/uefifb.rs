@@ -1,8 +1,9 @@
-use crate::cpu::CritSection;
+use crate::cpu::{CritSection, add_thread};
 use crate::driver::{Driver, DriverBus, DriverEntry, DriverError, DRIVERS};
 use crate::framebuffer::UnsafeFrameBuffer;
 use crate::memdrv::PatTypes;
 use crate::physmap::PhysMapper;
+use crate::thread::{Thread, ThreadFunc};
 use crate::GKARG;
 
 use core::fmt::Write;
@@ -183,6 +184,8 @@ impl Driver for UefiFrameBuffer {
         let s = Arc::new(Self::try_from(karg.get_fb())?);
         crate::klog::KernLogger::set_log_output(Arc::as_ptr(&s) as *mut UefiFrameBuffer);
         info!("Initialized UEFIFB @ {:?}", s.fb);
+
+        add_thread(0, alloc::boxed::Box::new(Thread::new(Arc::as_ptr(&s) as usize, 0x20, 0x10, Self::start_thread as u64)));
         Ok(s)
     }
 
@@ -243,6 +246,13 @@ impl UefiFrameBuffer {
             self.draw_buffer
                 .copy_within(old_offset..(old_offset + maxw), new_offset);
         }
+    }
+}
+
+impl ThreadFunc for UefiFrameBuffer {
+    extern "C" fn start_thread(&mut self) {
+        info!("Started UEFIFB thread {:?} !", (self.fbsize, self.fx, self.fy));
+        //panic!("Exiting...");
     }
 }
 
