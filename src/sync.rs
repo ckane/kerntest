@@ -7,6 +7,7 @@ use snafu::prelude::*;
 unsafe impl<T: Send> Send for KernSpinMutex<T> {}
 unsafe impl<T: Send> Sync for KernSpinMutex<T> {}
 
+#[derive(Debug)]
 /// Spinlock implementation adapted from https://whenderson.dev/blog/rust-mutexes/
 pub struct KernSpinMutex<T> {
     inner: UnsafeCell<T>,

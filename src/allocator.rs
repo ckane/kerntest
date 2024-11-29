@@ -1,5 +1,6 @@
 use core::alloc::{GlobalAlloc, Layout, LayoutError};
 use crate::cpu::CritSection;
+use crate::sync::KernSpinMutex;
 use log::{error, info, trace};
 use snafu::prelude::*;
 
@@ -215,7 +216,9 @@ impl Iterator for KernHeapSegmentIter {
 }
 
 #[derive(Debug)]
-pub struct KernelAlloc {}
+pub struct KernelAlloc {
+    alloc_mutex: KernSpinMutex<()>
+}
 
 struct InnerKernelAlloc {
     page_allocator: Option<&'static mut (dyn PageAllocator + Sync)>,
@@ -657,15 +660,25 @@ impl InnerKernelAlloc {
     }
 }
 
+impl KernelAlloc {
+    const fn new() -> Self {
+        Self {
+            alloc_mutex: KernSpinMutex::new(()),
+        }
+    }
+}
+
 unsafe impl GlobalAlloc for KernelAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let _lock = CritSection::new();
+        //let _lock = CritSection::new();
+        let _lock = self.alloc_mutex.lock();
         INNER_KERN_ALLOC
             .alloc(layout)
             .unwrap_or(core::ptr::null::<u8>() as *mut u8)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        let _lock = CritSection::new();
+        //let _lock = CritSection::new();
+        let _lock = self.alloc_mutex.lock();
         INNER_KERN_ALLOC.dealloc(ptr);
     }
 }
@@ -676,4 +689,4 @@ static mut INNER_KERN_ALLOC: InnerKernelAlloc = InnerKernelAlloc {
 };
 
 #[global_allocator]
-pub static KERN_ALLOC: KernelAlloc = KernelAlloc {};
+pub static KERN_ALLOC: KernelAlloc = KernelAlloc::new();
