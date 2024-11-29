@@ -80,8 +80,8 @@ pub(crate) struct Thread {
 pub trait ThreadFunc: Send + Sync {
     extern "C" fn start_thread(&mut self);
 
-    fn thread_entry(&mut self) -> alloc::boxed::Box<&mut (dyn ThreadFunc + Send + Sync)> where Self: Sized {
-        alloc::boxed::Box::new(self)
+    fn thread_entry(&self) -> extern "C" fn(&mut Self) {
+        Self::start_thread
     }
 }
 

@@ -185,7 +185,7 @@ impl Driver for UefiFrameBuffer {
         crate::klog::KernLogger::set_log_output(Arc::as_ptr(&s) as *mut UefiFrameBuffer);
         info!("Initialized UEFIFB @ {:?}", s.fb);
 
-        add_thread(0, alloc::boxed::Box::new(Thread::new(Arc::as_ptr(&s) as usize, 0x20, 0x10, Self::start_thread as u64)));
+        add_thread(0, alloc::boxed::Box::new(Thread::new(Arc::as_ptr(&s) as usize, 0x20, 0x10, s.thread_entry() as u64)));
         Ok(s)
     }
 
